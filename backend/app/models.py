@@ -211,7 +211,7 @@ class AccessRequest(BaseModel):
 
 # Query API Contract
 class QueryRequest(BaseModel):
-    vault_slug: str
+    vault_slug: Optional[str] = None
     query: str
     purpose: str = "project_analysis"
     client_supplied_filter: Optional[Dict[str, Any]] = None

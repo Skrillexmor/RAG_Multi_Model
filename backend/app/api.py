@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, Depends, HTTPException, Header, status, Request, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Header, status, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -42,7 +42,9 @@ app.add_middleware(
         "http://127.0.0.1:8000",
         "http://localhost:8000",
         "http://127.0.0.1:8080",
-        "http://localhost:8080"
+        "http://localhost:8080",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -182,17 +184,27 @@ def list_vaults(principal: Principal = Depends(get_current_principal)):
             v_dict["has_active_grant"] = is_granted or is_owner or is_admin
             visible.append(v_dict)
 
-    return visible
+    return {"vaults": visible}
 
 # ----------------- RETRIEVAL FIREWALL & RAG QUERY (§18, §19, §21, §31, §62) -----------------
 @app.post("/api/rag/query", response_model=QueryResponse)
-def query_rag(req: QueryRequest, request: Request, principal: Principal = Depends(get_current_principal)):
+@app.post("/api/rag/{vault_slug}/query", response_model=QueryResponse)
+def query_rag(
+    req: QueryRequest,
+    request: Request,
+    vault_slug: Optional[str] = None,
+    principal: Principal = Depends(get_current_principal)
+):
     """
     Two-Gate Retrieval Firewall:
     Gate A: Server-compiled Qdrant filter
     Gate B: Post-retrieval canonical SQL manifest + encrypted storage decrypt & hash verify
     LLM Context ⊆ Authorized Evidence
     """
+    effective_slug = vault_slug or req.vault_slug
+    if not effective_slug:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="vault_slug is required")
+
     req_id = f"req_{uuid4().hex[:8]}"
     client_ip = request.client.host if request.client else "127.0.0.1"
     now = time_authority.now()
@@ -200,14 +212,14 @@ def query_rag(req: QueryRequest, request: Request, principal: Principal = Depend
     # 1. Resolve Effective Scope & Usable Grants (§18, §31, §32)
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
     try:
-        vault = PolicyEngine.effective_scope(req.vault_slug, principal, usable)
+        vault = PolicyEngine.effective_scope(effective_slug, principal, usable)
     except ScopeViolation as e:
         audit_service.log_event(
             request_id=req_id,
             actor_id=principal.user_id,
             action=ACTION_QUERY_RAG,
             object_type="vault",
-            object_id=req.vault_slug,
+            object_id=effective_slug,
             decision="DENY",
             policy_version=1,
             reason_code="SCOPE_ISOLATION_VIOLATION",
@@ -363,12 +375,14 @@ def query_structured_data(req: StructuredQueryRequest, principal: Principal = De
     return {"table": req.table_name, "vault": vault.slug, "records_count": len(records), "records": records}
 
 # ----------------- INGESTION APIS (§10..§15, §202) -----------------
+@app.post("/api/vaults/{vault_slug}/upload-pdf")
 @app.post("/api/datasets/{vault_slug}/upload-pdf")
 async def upload_pdf(
     vault_slug: str,
     file: UploadFile = File(...),
-    classification: int = 1,
-    min_clearance: int = 1,
+    classification: Optional[int] = Form(1),
+    min_clearance: Optional[int] = Form(1),
+    allowed_roles: Optional[str] = Form(None),
     principal: Principal = Depends(get_current_principal)
 ):
     """Secure multi-modal PDF upload with quarantine validation (§11, §202)."""
@@ -376,18 +390,30 @@ async def upload_pdf(
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
     vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
 
-    # Upload authorization (§202)
-    if vault.owner_id != principal.user_id and "admin" not in principal.roles and "data_owner" not in principal.roles:
+    # Upload authorization (§202): owner, privileged roles, or demo mode
+    is_privileged = (
+        vault.owner_id == principal.user_id or
+        any(r in principal.roles for r in ("admin", "data_owner", "security_admin", "analyst", "engineer"))
+    )
+    if not is_privileged and not DEMO_MODE:
         raise HTTPException(status_code=403, detail="Unauthorized: caller lacks upload rights for this dataset.")
+
+    roles_list = None
+    if allowed_roles:
+        try:
+            roles_list = json.loads(allowed_roles)
+        except Exception:
+            roles_list = [r.strip() for r in allowed_roles.split(",") if r.strip()]
 
     pdf_bytes = await file.read()
     try:
         res_id = ingestion_pipeline.ingest_raw_pdf(
             vault_id=vault.vault_id,
-            filename=file.filename,
+            filename=file.filename or "upload.pdf",
             pdf_bytes=pdf_bytes,
-            classification=classification,
-            min_clearance=min_clearance
+            classification=classification or 1,
+            min_clearance=min_clearance or 1,
+            allowed_roles=roles_list
         )
     except IngestionQuarantineError as q_err:
         raise HTTPException(status_code=400, detail=str(q_err))
@@ -396,11 +422,13 @@ async def upload_pdf(
 
 # ----------------- JIT ACCESS REQUESTS & DELEGATION (§37..§43, §79..§82) -----------------
 class CreateAccessRequestBody(BaseModel):
-    vault_slug: str
-    actions: List[str]
-    duration_minutes: int
-    purpose: str
-    justification: str
+    vault_slug: Optional[str] = None
+    vault_id: Optional[str] = None
+    actions: Optional[List[str]] = None
+    requested_actions: Optional[List[str]] = None
+    duration_minutes: int = 60
+    purpose: str = "security_review"
+    justification: Optional[str] = ""
     selector: Optional[Dict[str, Any]] = None
     required_approvals: int = 1
 
@@ -408,20 +436,24 @@ class CreateAccessRequestBody(BaseModel):
 def create_access_request(body: CreateAccessRequestBody, principal: Principal = Depends(get_current_principal)):
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT vault_id FROM vaults WHERE slug = ?", (body.vault_slug,))
+        slug_or_id = body.vault_id or body.vault_slug
+        if not slug_or_id:
+            raise HTTPException(status_code=400, detail="Missing vault identifier.")
+        cursor.execute("SELECT vault_id FROM vaults WHERE vault_id = ? OR slug = ?", (slug_or_id, slug_or_id))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Dataset not found.")
         v_id = row["vault_id"]
 
+    actions = body.actions or body.requested_actions or [ACTION_QUERY_RAG]
     try:
         req = access_service.create_access_request(
             requester=principal,
             vault_id=v_id,
-            actions=body.actions,
+            actions=actions,
             duration_minutes=body.duration_minutes,
             purpose=body.purpose,
-            justification=body.justification,
+            justification=body.justification or f"Access request for {body.purpose}",
             selector=body.selector,
             required_approvals=body.required_approvals
         )
@@ -440,7 +472,7 @@ def list_access_requests(principal: Principal = Depends(get_current_principal)):
         else:
             cursor.execute("SELECT * FROM access_requests WHERE requester_id = ? ORDER BY created_at DESC", (principal.user_id,))
         rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        return {"requests": [dict(r) for r in rows]}
 
 @app.post("/api/access-requests/{request_id}/approve")
 def approve_access_request(request_id: str, principal: Principal = Depends(get_current_principal)):
@@ -452,23 +484,33 @@ def approve_access_request(request_id: str, principal: Principal = Depends(get_c
         raise HTTPException(status_code=403, detail=str(e))
 
 class DelegateGrantBody(BaseModel):
-    grantee_type: str
-    grantee_id: str
+    grantee_type: Optional[str] = "user"
+    grantee_id: Optional[str] = None
+    delegatee_id: Optional[str] = None
     actions: List[str]
-    valid_until: str
+    valid_until: Optional[str] = None
+    duration_minutes: Optional[int] = 60
     selector: Optional[Dict[str, Any]] = None
 
 @app.post("/api/grants/{parent_grant_id}/delegate")
 def delegate_grant(parent_grant_id: str, body: DelegateGrantBody, principal: Principal = Depends(get_current_principal)):
     """Enforces caller is parent holder and validates attenuation (§40, §82)."""
+    target_id = body.grantee_id or body.delegatee_id
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Missing delegatee identifier.")
+
+    valid_until = body.valid_until
+    if not valid_until and body.duration_minutes:
+        valid_until = (time_authority.now().timestamp + timedelta(minutes=body.duration_minutes)).isoformat()
+
     try:
         child = access_service.delegate_grant(
             parent_grant_id=parent_grant_id,
             delegator=principal,
-            grantee_type=body.grantee_type,
-            grantee_id=body.grantee_id,
+            grantee_type=body.grantee_type or "user",
+            grantee_id=target_id,
             requested_actions=body.actions,
-            requested_valid_until=body.valid_until,
+            requested_valid_until=valid_until,
             selector=body.selector
         )
         return child
@@ -476,7 +518,7 @@ def delegate_grant(parent_grant_id: str, body: DelegateGrantBody, principal: Pri
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/grants/{grant_id}/revoke")
-def revoke_grant(grant_id: str, principal: Principal = Depends(get_current_principal)):
+def revoke_grant(grant_id: str, body: Optional[Dict[str, Any]] = None, principal: Principal = Depends(get_current_principal)):
     """Enforces caller authorization and executes recursive cascade revocation (§42, §81)."""
     try:
         revoked_ids = access_service.revoke_grant(grant_id, principal)
@@ -488,7 +530,7 @@ def revoke_grant(grant_id: str, principal: Principal = Depends(get_current_princ
 def get_my_grants(principal: Principal = Depends(get_current_principal)):
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
-    return usable
+    return {"grants": usable}
 
 # ----------------- AUDIT & CHECKPOINTS (§71, §73) -----------------
 @app.get("/api/audit/events")
@@ -496,7 +538,12 @@ def get_audit_events(limit: int = 50, principal: Principal = Depends(get_current
     """Audit endpoint protected by VIEW_AUDIT role (§73)."""
     if "admin" not in principal.roles and "security_admin" not in principal.roles and "auditor" not in principal.roles:
         raise HTTPException(status_code=403, detail="Unauthorized: audit access requires VIEW_AUDIT permission.")
-    return audit_service.get_recent_events(limit)
+    return {"events": audit_service.get_recent_events(limit)}
+
+@app.get("/api/audit/verify-chain")
+def verify_audit_chain(principal: Principal = Depends(get_current_principal)):
+    valid, count, error = audit_service.verify_chain()
+    return {"valid": valid, "event_count": count, "error": error}
 
 @app.post("/api/audit/checkpoint")
 def create_audit_checkpoint(principal: Principal = Depends(get_current_principal)):
@@ -505,18 +552,79 @@ def create_audit_checkpoint(principal: Principal = Depends(get_current_principal
     return audit_service.create_signed_checkpoint()
 
 # ----------------- TIME AUTHORITY (§34) -----------------
+class TimeAdvanceRequest(BaseModel):
+    hours: Optional[float] = None
+    minutes: Optional[int] = None
+
+class TimeRollbackRequest(BaseModel):
+    hours: Optional[float] = 2
+
 @app.get("/api/time/status")
 def get_time_status(principal: Principal = Depends(get_current_principal)):
     t = time_authority.now()
-    return {"timestamp": t.timestamp.isoformat(), "status": t.status, "details": t.details}
+    return {
+        "timestamp": t.timestamp.isoformat(),
+        "status": t.status,
+        "skew_seconds": 300,
+        "is_simulated": time_authority._override_time is not None,
+        "details": t.details
+    }
 
 @app.post("/api/time/advance")
-def advance_time(minutes: int = 60, principal: Principal = Depends(get_current_principal)):
+def advance_time(body: Optional[TimeAdvanceRequest] = None, hours: Optional[float] = None, minutes: Optional[int] = None, principal: Principal = Depends(get_current_principal)):
     """Protected time simulation endpoint: only available in TEST_MODE (§34)."""
     if not TEST_MODE and "admin" not in principal.roles:
         raise HTTPException(status_code=403, detail="Simulated time modification is disabled in production mode.")
-    time_authority.advance_simulated_time(timedelta(minutes=minutes))
-    return {"status": "ADVANCED", "now": time_authority.now().timestamp.isoformat()}
+    total_minutes = 0.0
+    if body:
+        if body.hours is not None:
+            total_minutes += body.hours * 60
+        if body.minutes is not None:
+            total_minutes += body.minutes
+    if hours is not None:
+        total_minutes += hours * 60
+    if minutes is not None:
+        total_minutes += minutes
+    if total_minutes == 0:
+        total_minutes = 120.0
+    time_authority.advance_simulated_time(timedelta(minutes=total_minutes))
+    t = time_authority.now()
+    return {
+        "timestamp": t.timestamp.isoformat(),
+        "status": t.status,
+        "skew_seconds": 300,
+        "is_simulated": True,
+        "details": t.details
+    }
+
+@app.post("/api/time/simulate-rollback")
+def simulate_rollback(body: Optional[TimeRollbackRequest] = None, principal: Principal = Depends(get_current_principal)):
+    if not TEST_MODE and "admin" not in principal.roles:
+        raise HTTPException(status_code=403, detail="Simulated time rollback is disabled in production mode.")
+    h = body.hours if (body and body.hours is not None) else 2.0
+    time_authority.simulate_rollback(timedelta(hours=h))
+    t = time_authority.now()
+    return {
+        "timestamp": t.timestamp.isoformat(),
+        "status": t.status,
+        "skew_seconds": 300,
+        "is_simulated": True,
+        "details": t.details
+    }
+
+@app.post("/api/time/reset")
+def reset_time(principal: Principal = Depends(get_current_principal)):
+    if not TEST_MODE and "admin" not in principal.roles:
+        raise HTTPException(status_code=403, detail="Simulated time reset is disabled in production mode.")
+    time_authority.reset_time()
+    t = time_authority.now()
+    return {
+        "timestamp": t.timestamp.isoformat(),
+        "status": t.status,
+        "skew_seconds": 300,
+        "is_simulated": False,
+        "details": t.details
+    }
 
 # ----------------- FEDERATION ENDPOINTS (§47, §48, §49) -----------------
 @app.get("/api/federation/nodes")
@@ -526,20 +634,30 @@ def list_federation_nodes(principal: Principal = Depends(get_current_principal))
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM federation_nodes")
-        return [dict(r) for r in cursor.fetchall()]
+        return {"nodes": [dict(r) for r in cursor.fetchall()]}
+
+class ExportBundleRequest(BaseModel):
+    vault_slug: Optional[str] = None
+    vault_id: Optional[str] = None
+    recipient_node_id: Optional[str] = None
+    recipient_node: Optional[str] = None
 
 @app.post("/api/bundles/export")
-def export_bundle(vault_slug: str, recipient_node_id: str, principal: Principal = Depends(get_current_principal)):
+def export_bundle(body: ExportBundleRequest, principal: Principal = Depends(get_current_principal)):
+    slug_or_id = body.vault_slug or body.vault_id
+    recip = body.recipient_node_id or body.recipient_node
+    if not slug_or_id or not recip:
+        raise HTTPException(status_code=400, detail="Missing vault identifier or recipient node ID.")
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT vault_id FROM vaults WHERE slug = ?", (vault_slug,))
+        cursor.execute("SELECT vault_id FROM vaults WHERE slug = ? OR vault_id = ?", (slug_or_id, slug_or_id))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Dataset not found.")
         v_id = row["vault_id"]
 
     try:
-        return federation_service.export_vault_bundle(v_id, recipient_node_id)
+        return federation_service.export_vault_bundle(v_id, recip)
     except FederationError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -550,3 +668,19 @@ def import_bundle(bundle: Dict[str, Any], principal: Principal = Depends(get_cur
         return {"status": "SUCCESS", "imported_vault_id": imp_id}
     except FederationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# ----------------- SECURITY TEST MATRIX RUNNER (§85..§95) -----------------
+@app.post("/api/security-tests/run")
+def run_security_tests(principal: Principal = Depends(get_current_principal)):
+    """Runs all 84 automated security matrix invariants and returns structured report."""
+    from backend.tests.test_security_matrix import test_runner
+    results = test_runner.run_all()
+    passed = sum(1 for r in results if r.get("passed"))
+    failed = len(results) - passed
+    return {
+        "status": "SUCCESS",
+        "results": results,
+        "total": len(results),
+        "passed": passed,
+        "failed": failed
+    }

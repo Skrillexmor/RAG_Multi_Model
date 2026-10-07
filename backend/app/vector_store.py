@@ -30,8 +30,11 @@ class RealNeuralVectorStore:
         self.embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
         self.collection_name = "secure_chunks"
         
-        # Connect to persistent local disk storage
-        self.qdrant = QdrantClient(path=str(QDRANT_STORAGE_DIR))
+        # Connect to persistent local disk storage (or memory if locked by another process)
+        try:
+            self.qdrant = QdrantClient(path=str(QDRANT_STORAGE_DIR))
+        except Exception:
+            self.qdrant = QdrantClient(":memory:")
         self._init_collection()
 
     def _init_collection(self):
