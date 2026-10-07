@@ -30,6 +30,7 @@ ENV/
 
 # Sensitive data, encryption keys & local databases
 data/*.db
+data/*.db-*
 data/*.sqlite
 data/*.sqlite3
 data/*.pem
@@ -63,3 +64,4 @@ Thumbs.db
 # Logs & temp files
 *.log
 scratch/
+frontend/node_modules/
