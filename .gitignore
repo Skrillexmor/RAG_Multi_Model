@@ -34,9 +34,14 @@ data/*.sqlite
 data/*.sqlite3
 data/*.pem
 data/*.key
+data/*.hex
+data/.*
 data/*.json
+data/*.log
 data/qdrant_db/
 data/qdrant_storage/
+storage/encrypted/*.enc
+storage/quarantine/*
 
 # Keep directory structure
 !data/.gitkeep

@@ -1,18 +1,26 @@
 import json
 import hashlib
+from pathlib import Path
 from datetime import datetime
-from typing import List, Tuple, Dict, Any
-from .models import Principal, Vault, Chunk, EvidenceItem, AuthorizationProofObject, ResourceManifest, Grant
+from typing import List, Tuple, Dict, Any, Optional
+from uuid import uuid4
+
+from .models import (
+    Principal, Vault, Chunk, EvidenceItem, AuthorizationProofObject,
+    ResourceManifest, Grant, ACTION_RETRIEVE_EVIDENCE
+)
 from .database import db
 from .policy_engine import PolicyEngine
 from .time_authority import time_authority
-from uuid import uuid4
+from .crypto import derive_vault_kek, decrypt_from_file, compute_content_hash
 
 class CanonicalGate:
     """
-    Gate B — Post-Retrieval Canonical Authorization Gate (§1.7, §14, A3, A6, A10).
-    Authoritative database boundary. Ensures no candidate enters the LLM context
-    unless current resource manifest, fresh ACL, active grant, and time deadline are satisfied.
+    Gate B — Post-Retrieval Canonical Authorization Gate (§15, §21, §22, §23).
+    Authoritative database & encrypted storage boundary.
+    Loads canonical encrypted content from disk, decrypts with Vault KEK,
+    verifies SHA-256 integrity, enforces current policy_version and fresh ACL,
+    and envelopes authorized items with cryptographic proof objects.
     """
 
     @classmethod
@@ -31,21 +39,27 @@ class CanonicalGate:
         now = time_authority.now()
         now_iso = now.isoformat()
 
-        # Context deadline check: Fail closed if time has passed lease deadline
+        # Context deadline check: Fail closed if time has passed lease deadline (§23)
         if now_iso > lease_deadline:
             return [], len(candidates)
 
         authorized_items: List[EvidenceItem] = []
         excluded_count = 0
+        vault_kek = derive_vault_kek(vault.vault_id)
 
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
             for chunk, score in candidates:
                 # 1. Fetch fresh canonical resource manifest from authoritative SQL store
-                cursor.execute("SELECT * FROM resource_manifests WHERE resource_id = ?", (chunk.resource_id,))
+                cursor.execute("""
+                SELECT rm.*, r.status as resource_status, r.content_hash as res_content_hash
+                FROM resource_manifests rm
+                JOIN resources r ON rm.resource_id = r.resource_id
+                WHERE rm.resource_id = ?
+                """, (chunk.resource_id,))
                 m_row = cursor.fetchone()
-                if not m_row:
+                if not m_row or m_row["resource_status"] != "active":
                     excluded_count += 1
                     continue
 
@@ -65,10 +79,37 @@ class CanonicalGate:
                     acl_version=m_row["acl_version"]
                 )
 
-                # 2. Point-in-time canonical decision
+                # 2. Fetch canonical chunk record from SQL database
+                cursor.execute("SELECT * FROM chunks WHERE chunk_id = ?", (chunk.chunk_id,))
+                chunk_row = cursor.fetchone()
+                if not chunk_row:
+                    excluded_count += 1
+                    continue
+
+                # 3. Retrieve and Decrypt Canonical Content (§15, §21)
+                canonical_plaintext = None
+                storage_path_str = chunk_row["storage_path"] if "storage_path" in chunk_row.keys() else None
+                if storage_path_str and Path(storage_path_str).exists():
+                    try:
+                        decrypted_bytes = decrypt_from_file(Path(storage_path_str), vault_kek)
+                        canonical_plaintext = decrypted_bytes.decode("utf-8")
+                    except Exception:
+                        excluded_count += 1
+                        continue
+                else:
+                    # Fallback to database content field
+                    canonical_plaintext = chunk_row["content"]
+
+                # 4. Content Hash Integrity Verification (§21, §189)
+                computed_hash = compute_content_hash(canonical_plaintext.encode("utf-8"))
+                if computed_hash != chunk_row["content_hash"]:
+                    excluded_count += 1  # Corrupted or tampered content -> fail-closed
+                    continue
+
+                # 5. Point-in-time canonical authorization decision
                 decision, reason, matched_rules = PolicyEngine.decide(
                     principal=principal,
-                    action="rag_context",
+                    action=ACTION_RETRIEVE_EVIDENCE,
                     manifest=manifest,
                     usable_grants=usable_grants
                 )
@@ -77,10 +118,10 @@ class CanonicalGate:
                     excluded_count += 1
                     continue
 
-                # 3. Locate matching grant for proof object
+                # 6. Locate matching grant for proof object
                 matching_grant = None
                 for g in usable_grants:
-                    if g.vault_id == vault.vault_id and "rag_context" in g.actions:
+                    if g.vault_id == vault.vault_id and ACTION_RETRIEVE_EVIDENCE in g.actions:
                         matching_grant = g
                         break
 
@@ -91,8 +132,8 @@ class CanonicalGate:
 
                 evidence_id = f"ev_{uuid4().hex[:8]}"
 
-                # 4. Generate Authorization Proof Object v3 (§A18)
-                proof_data = f"{evidence_id}:{principal.user_id}:{vault.vault_id}:{chunk.resource_id}:{grant_id}:{now_iso}"
+                # 7. Generate Authorization Proof Object v3 (§A18, §271)
+                proof_data = f"{evidence_id}:{principal.user_id}:{vault.vault_id}:{chunk.resource_id}:{grant_id}:{manifest.policy_version}:{now_iso}"
                 proof_hash = hashlib.sha256(proof_data.encode("utf-8")).hexdigest()
 
                 proof = AuthorizationProofObject(
@@ -113,11 +154,11 @@ class CanonicalGate:
                     hash=proof_hash
                 )
 
-                # 5. Field / Column Projection & Redaction (§1.8, §2.6)
-                # If grant selector has field exclusions or projections
-                content_text = chunk.content
+                # 8. Generic Selector Field Projection & Redaction (§20, §215)
+                content_text = canonical_plaintext
                 if matching_grant and matching_grant.selector:
                     exclude_tags = matching_grant.selector.get("exclude_tags", [])
+                    # Redact or exclude if tags apply
                     if "hr-bank" in exclude_tags and "BANK:" in content_text:
                         content_text = content_text.split("BANK:")[0] + "[REDACTED: BANK DETAILS]"
 
@@ -128,8 +169,8 @@ class CanonicalGate:
                     vault_id=vault.vault_id,
                     vault_name=vault.display_name,
                     content=content_text,
-                    classification=chunk.classification,
-                    provenance=chunk.provenance,
+                    classification=chunk_row["classification"],
+                    provenance=json.loads(chunk_row["provenance"]),
                     score=score,
                     proof=proof
                 )

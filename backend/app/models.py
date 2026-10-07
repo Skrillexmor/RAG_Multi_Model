@@ -1,17 +1,47 @@
 from typing import List, Dict, Any, Optional, Literal, Tuple
 from pydantic import BaseModel, Field
 from datetime import datetime
-from uuid import UUID, uuid4
 
-# Security Classifications
-# 0: Public, 1: Internal, 2: Confidential, 3: Restricted / Secret
-ClassificationLevel = Literal[0, 1, 2, 3]
+# Security Classifications (§164)
+# 0: Public, 1: Internal, 2: Confidential, 3: Restricted, 4: Credential / Secret
+ClassificationLevel = Literal[0, 1, 2, 3, 4]
 
 CLASSIFICATION_NAMES = {
     0: "PUBLIC",
     1: "INTERNAL",
     2: "CONFIDENTIAL",
-    3: "RESTRICTED"
+    3: "RESTRICTED",
+    4: "CREDENTIAL"
+}
+
+# Granular Action Permissions (§7)
+ACTION_DISCOVER_DATASET = "discover_dataset"
+ACTION_QUERY_RAG = "query_rag"
+ACTION_RETRIEVE_EVIDENCE = "retrieve_evidence"
+ACTION_VIEW_SOURCE = "view_source"
+ACTION_FETCH_PAGE = "fetch_page"
+ACTION_FETCH_CHUNK = "fetch_chunk"
+ACTION_FETCH_ROW = "fetch_row"
+ACTION_FETCH_FIELD = "fetch_field"
+ACTION_DOWNLOAD_DOCUMENT = "download_document"
+ACTION_EXPORT_DATA = "export_data"
+ACTION_SHARE_DATA = "share_data"
+ACTION_DELEGATE_PERMISSION = "delegate_permission"
+ACTION_EDIT_DATA = "edit_data"
+ACTION_DELETE_DATA = "delete_data"
+ACTION_MANAGE_POLICY = "manage_policy"
+ACTION_APPROVE_ACCESS_REQUEST = "approve_access_request"
+ACTION_VIEW_AUDIT = "view_audit"
+ACTION_MANAGE_SYSTEM = "manage_system"
+ACTION_FETCH_SECRET = "fetch_secret"
+
+ALLOWED_PURPOSES = {
+    "project_analysis",
+    "incident_response",
+    "audit",
+    "maintenance",
+    "research",
+    "business_inquiry"
 }
 
 # Principal Context
@@ -22,7 +52,7 @@ class Principal(BaseModel):
     roles: List[str] = Field(default_factory=list)
     groups: List[str] = Field(default_factory=list)
     department: str = "General"
-    clearance: int = 1  # 0 to 3
+    clearance: int = 1  # 0 to 4
     is_active: bool = True
     auth_epoch: int = 1
 
@@ -34,7 +64,7 @@ class Principal(BaseModel):
             res.append(f"group:{g}")
         return res
 
-# Vault Model (Architecture v3 A2, V2)
+# Vault / Dataset Model (§4, §32)
 class Vault(BaseModel):
     vault_id: str
     tenant_id: str = "default_tenant"
@@ -45,7 +75,8 @@ class Vault(BaseModel):
     classification_ceiling: int = 2
     status: Literal["draft", "active", "frozen", "archived", "shredded"] = "active"
     scope_mode: Literal["strict_single", "federated_opt_in"] = "strict_single"
-    discoverable: bool = True
+    visibility: Literal["private", "role_shared", "public"] = "private"
+    discoverable: bool = False
     allow_delegation: bool = True
     max_delegation_depth: int = 1
     retention: Dict[str, Any] = Field(default_factory=dict)
@@ -55,21 +86,20 @@ class Vault(BaseModel):
     vault_epoch: int = 1
     created_at: str
 
-# Grant Model (Architecture v3 A4, A5, V5)
+# Grant Model (§35, §36)
 class Grant(BaseModel):
     grant_id: str
     vault_id: str
     grantee_type: Literal["user", "role", "group", "node"]
-    grantee_id: str  # e.g., "analyst", "bob", "finance"
+    grantee_id: str
     selector: Dict[str, Any] = Field(default_factory=lambda: {"all": True})
-    # actions: rag_context, view, download, export, share, delegate
-    actions: List[str] = Field(default_factory=lambda: ["rag_context", "view"])
+    actions: List[str] = Field(default_factory=lambda: [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE])
     valid_from: str
     valid_until: Optional[str] = None
-    schedule: Optional[Dict[str, Any]] = None  # e.g., {"windows": [{"days": "Mon-Fri", "from": "09:00", "to": "18:00"}]}
-    quota: Optional[Dict[str, Any]] = None  # e.g., {"max_queries": 100, "max_evidence": 500}
+    schedule: Optional[Dict[str, Any]] = None
+    quota: Optional[Dict[str, Any]] = None
     conditions: Optional[Dict[str, Any]] = None
-    purpose: str = "business_inquiry"
+    purpose: str = "project_analysis"
     delegable: bool = False
     depth: int = 0
     parent_grant_id: Optional[str] = None
@@ -81,24 +111,18 @@ class Grant(BaseModel):
     signature: str = ""
     created_at: str
 
-# Authorization Lease (Architecture v3 A6)
+# Authorization Lease
 class AuthorizationLease(BaseModel):
     lease_id: str
     principal_id: str
-    grants: List[str]  # IDs of active usable grants
+    grants: List[str]
     policy_epoch: int
     vault_epochs: Dict[str, int]
     issued_at: str
-    deadline: str  # ISO timestamp
+    deadline: str
     time_status: Literal["OK", "DEGRADED", "CLOCK_ROLLBACK", "CLOCK_JUMP_QUARANTINE"]
 
-# Rag Scope (Architecture v3 A2)
-class RagScope(BaseModel):
-    vault_ids: List[str]
-    prompt_profile: Dict[str, Any] = Field(default_factory=lambda: {"allow_general_knowledge": False})
-    namespace: str
-
-# Resource Manifest (Architecture 1.2)
+# Resource Manifest (§8)
 class ResourceManifest(BaseModel):
     resource_id: str
     vault_id: str
@@ -110,11 +134,11 @@ class ResourceManifest(BaseModel):
     denied_users: List[str] = Field(default_factory=list)
     denied_roles: List[str] = Field(default_factory=list)
     min_clearance: int = 1
-    operations: List[str] = Field(default_factory=lambda: ["read", "rag_context"])
+    operations: List[str] = Field(default_factory=lambda: [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE])
     policy_version: int = 1
     acl_version: int = 1
 
-# Chunk (Architecture 1.3, 1.4)
+# Chunk Model
 class Chunk(BaseModel):
     chunk_id: str
     resource_id: str
@@ -123,13 +147,14 @@ class Chunk(BaseModel):
     content: str
     classification: int
     min_clearance: int
-    acl_selector: List[str]  # e.g., ["role:analyst", "user:alice"]
+    acl_selector: List[str]
     deny_selector: List[str]
-    provenance: Dict[str, Any]  # {page: int, line_start: int, line_end: int, file_hash: str, bbox: ...}
+    provenance: Dict[str, Any]
     content_hash: str
+    storage_path: Optional[str] = None
     created_at: str
 
-# Evidence Envelope (Architecture §1.14.3, A18)
+# Evidence Envelope (§22)
 class AuthorizationProofObject(BaseModel):
     evidence_id: str
     principal_id: str
@@ -160,7 +185,16 @@ class EvidenceItem(BaseModel):
     score: float
     proof: AuthorizationProofObject
 
-# JIT Access Request (Architecture v3 A9, V6)
+# Structured Records & Field Policies (§24, §26, §27)
+class FieldPolicy(BaseModel):
+    field_name: str
+    classification: int = 1
+    min_clearance: int = 1
+    allowed_roles: List[str] = Field(default_factory=list)
+    denied_roles: List[str] = Field(default_factory=list)
+    is_sensitive: bool = False
+
+# JIT Access Request
 class AccessRequest(BaseModel):
     request_id: str
     vault_id: str
@@ -172,20 +206,14 @@ class AccessRequest(BaseModel):
     justification: str
     state: Literal["requested", "approved", "denied", "cancelled", "expired"] = "requested"
     required_approvals: int = 1
+    approvals_count: int = 0
     created_at: str
-
-class AccessRequestApproval(BaseModel):
-    request_id: str
-    approver_id: str
-    decision: Literal["approve", "deny"]
-    decided_at: str
 
 # Query API Contract
 class QueryRequest(BaseModel):
     vault_slug: str
     query: str
-    purpose: str = "rag_context"
-    # Note: Client CANNOT pass custom filters. Any user-supplied filter is rejected/ignored.
+    purpose: str = "project_analysis"
     client_supplied_filter: Optional[Dict[str, Any]] = None
 
 class Citation(BaseModel):
@@ -211,7 +239,8 @@ class RetrievalSecurityTrace(BaseModel):
     excluded_candidates_count: int
     citations_validated_count: int
     citations_total_count: int
-    answer_status: Literal["GROUNDED", "REFUSED", "CITATION_MISMATCH"]
+    generation_mode: Literal["LLM_GROUNDED", "SAFE_EXTRACTIVE_MODE", "ANSWER_BLOCKED"] = "LLM_GROUNDED"
+    answer_status: Literal["GROUNDED", "REFUSED", "CITATION_MISMATCH", "SAFE_EXTRACTIVE"]
     refusal_reason: Optional[str] = None
 
 class QueryResponse(BaseModel):
@@ -223,3 +252,11 @@ class QueryResponse(BaseModel):
     evidence_items: List[EvidenceItem]
     security_trace: RetrievalSecurityTrace
     lease_deadline: str
+
+class AuditCheckpoint(BaseModel):
+    checkpoint_id: str
+    event_count: int
+    last_event_id: int
+    checkpoint_hash: str
+    signature: str
+    created_at: str

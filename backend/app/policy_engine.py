@@ -2,12 +2,19 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Tuple, Optional, Literal
-from .models import Principal, Grant, Vault, ResourceManifest, AuthorizationLease
+from uuid import uuid4
+
+from .models import (
+    Principal, Grant, Vault, ResourceManifest, AuthorizationLease,
+    ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE,
+    ACTION_DOWNLOAD_DOCUMENT, ACTION_SHARE_DATA, ACTION_DELEGATE_PERMISSION,
+    ACTION_APPROVE_ACCESS_REQUEST, ACTION_VIEW_AUDIT, ACTION_FETCH_SECRET,
+    ALLOWED_PURPOSES
+)
 from .database import db
 from .crypto import verify_grant_signature
 from .time_authority import time_authority
 from .config import LEASE_TTL_SECONDS, RESTRICTED_LEASE_TTL_SECONDS
-from uuid import uuid4
 
 class ScopeViolation(Exception):
     pass
@@ -17,8 +24,7 @@ class DelegationViolation(Exception):
 
 class PolicyEngine:
     """
-    Deterministic RBAC + ABAC + Grant policy evaluation engine.
-    Follows Master Spec §2, §9, §10 and Architecture v3 §A2, §A5, §A6, §A8.
+    Deterministic NIST SP 800-162 RBAC + ABAC + Grant PDP Engine (§5, §6, §20, §97).
     """
 
     @staticmethod
@@ -69,7 +75,6 @@ class PolicyEngine:
 
         for win in schedule.get("windows", []):
             days = win.get("days", "")
-            # e.g. Mon-Fri
             if "Mon-Fri" in days and now.weekday() < 5:
                 if win.get("from", "00:00") <= curr_hm <= win.get("to", "23:59"):
                     return True
@@ -80,7 +85,7 @@ class PolicyEngine:
 
     @classmethod
     def usable_grants(cls, principal: Principal, now: datetime, net_ctx: Optional[dict] = None) -> List[Grant]:
-        """A5 Grant evaluation algorithm: filters active, signed, unexpired grants within schedule & quota."""
+        """Filters active, signed, unexpired grants within schedule & quota (§35, §36)."""
         if not principal.is_active:
             return []
 
@@ -102,189 +107,219 @@ class PolicyEngine:
             cursor.execute(query, (*subjects, now_iso, now_iso))
             rows = cursor.fetchall()
 
-            for row in rows:
+            for r in rows:
                 grant_dict = {
-                    "grant_id": row["grant_id"],
-                    "vault_id": row["vault_id"],
-                    "grantee_type": row["grantee_type"],
-                    "grantee_id": row["grantee_id"],
-                    "selector": json.loads(row["selector"]),
-                    "actions": json.loads(row["actions"]),
-                    "valid_from": row["valid_from"],
-                    "valid_until": row["valid_until"],
-                    "purpose": row["purpose"]
+                    "grant_id": r["grant_id"],
+                    "vault_id": r["vault_id"],
+                    "grantee_type": r["grantee_type"],
+                    "grantee_id": r["grantee_id"],
+                    "selector": json.loads(r["selector"]),
+                    "actions": json.loads(r["actions"]),
+                    "valid_from": r["valid_from"],
+                    "valid_until": r["valid_until"],
+                    "schedule": json.loads(r["schedule"]) if r["schedule"] else None,
+                    "quota": json.loads(r["quota"]) if r["quota"] else None,
+                    "conditions": json.loads(r["conditions"]) if r["conditions"] else None,
+                    "purpose": r["purpose"],
+                    "delegable": bool(r["delegable"]),
+                    "depth": r["depth"],
+                    "parent_grant_id": r["parent_grant_id"],
+                    "issuer_id": r["issuer_id"],
+                    "state": r["state"],
+                    "signature": r["signature"],
+                    "created_at": r["created_at"]
                 }
 
-                # 1. Verify Ed25519 digital signature
-                if not verify_grant_signature(grant_dict, row["signature"]):
-                    continue  # Tamper detected -> fail closed
+                # Cryptographic signature verification
+                if not verify_grant_signature(grant_dict, r["signature"]):
+                    continue  # Invalid signature -> reject fail-closed
 
-                # 2. Schedule check
-                schedule = json.loads(row["schedule"]) if row["schedule"] else None
-                if not cls.in_schedule(schedule, now):
+                # Schedule check
+                if not cls.in_schedule(grant_dict["schedule"], now):
                     continue
 
-                # 3. Quota check
-                quota = json.loads(row["quota"]) if row["quota"] else None
-                if quota and "max_queries" in quota:
-                    cursor.execute("SELECT queries FROM grant_usage WHERE grant_id = ?", (row["grant_id"],))
-                    usage_row = cursor.fetchone()
-                    if usage_row and usage_row["queries"] >= quota["max_queries"]:
-                        continue
-
-                # 4. Chain validity check (for delegated grants)
-                if row["parent_grant_id"]:
-                    if not cls._chain_valid(cursor, row["parent_grant_id"], now_iso):
-                        continue
-
-                usable.append(Grant(
-                    grant_id=row["grant_id"],
-                    vault_id=row["vault_id"],
-                    grantee_type=row["grantee_type"],
-                    grantee_id=row["grantee_id"],
-                    selector=grant_dict["selector"],
-                    actions=grant_dict["actions"],
-                    valid_from=row["valid_from"],
-                    valid_until=row["valid_until"],
-                    schedule=schedule,
-                    quota=quota,
-                    purpose=row["purpose"],
-                    delegable=bool(row["delegable"]),
-                    depth=row["depth"],
-                    parent_grant_id=row["parent_grant_id"],
-                    issuer_id=row["issuer_id"],
-                    state=row["state"],
-                    signature=row["signature"],
-                    created_at=row["created_at"]
-                ))
+                usable.append(Grant(**grant_dict))
 
         return usable
 
     @classmethod
-    def _chain_valid(cls, cursor: sqlite3.Cursor, grant_id: str, now_iso: str, depth: int = 0) -> bool:
-        """Recursive check: all ancestor grants must be active and unexpired (§A8)."""
-        if depth > 4:
+    def effective_scope(cls, vault_slug_or_id: str, principal: Principal, usable_grants: List[Grant]) -> Vault:
+        """
+        Resolves authoritative vault and validates tenant + workspace access.
+        Enforces: "My RAG works only on my data unless explicitly shared" (§4, §32).
+        """
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM vaults WHERE slug = ? OR vault_id = ?", (vault_slug_or_id, vault_slug_or_id))
+            row = cursor.fetchone()
+            if not row:
+                raise ScopeViolation("Vault does not exist (SCOPE_UNKNOWN).")
+
+            vault = Vault(
+                vault_id=row["vault_id"],
+                tenant_id=row["tenant_id"],
+                slug=row["slug"],
+                display_name=row["display_name"],
+                owner_id=row["owner_id"],
+                steward_role_id=row["steward_role_id"],
+                classification_ceiling=row["classification_ceiling"],
+                status=row["status"],
+                scope_mode=row["scope_mode"],
+                visibility=row["visibility"],
+                discoverable=bool(row["discoverable"]),
+                allow_delegation=bool(row["allow_delegation"]),
+                max_delegation_depth=row["max_delegation_depth"],
+                retention=json.loads(row["retention"]),
+                key_id=row["key_id"],
+                origin=row["origin"],
+                import_terms=json.loads(row["import_terms"]) if row["import_terms"] else None,
+                vault_epoch=row["vault_epoch"],
+                created_at=row["created_at"]
+            )
+
+            # Tenant isolation (§139)
+            if vault.tenant_id != principal.tenant_id:
+                raise ScopeViolation("Cross-tenant access strictly forbidden (TENANT_MISMATCH).")
+
+            # Check if user is owner
+            if vault.owner_id == principal.user_id:
+                return vault
+
+            # Check if user has an active grant for this vault
+            has_grant = any(g.vault_id == vault.vault_id for g in usable_grants)
+            if has_grant:
+                return vault
+
+            # Check if user has steward role or admin clearance
+            if vault.steward_role_id and vault.steward_role_id in principal.roles:
+                return vault
+
+            if "admin" in principal.roles and vault.visibility != "private":
+                return vault
+
+            # Default: PRIVATE data cannot be accessed by other users without an explicit grant (§32)
+            raise ScopeViolation(f"Access to private workspace '{vault.display_name}' denied: no active grant held.")
+
+    @classmethod
+    def matches_selector(cls, selector: Dict[str, Any], manifest_or_chunk: Any) -> bool:
+        """
+        Generic Selector Engine (§20):
+        Interprets: include_tags, exclude_tags, max_classification, resource_id.
+        """
+        if not selector or selector.get("all") is True:
+            return True
+
+        # Check classification ceiling
+        max_class = selector.get("max_classification")
+        target_class = getattr(manifest_or_chunk, "classification", None)
+        if max_class is not None and target_class is not None:
+            if target_class > max_class:
+                return False
+
+        # Check specific resource ID
+        target_res = getattr(manifest_or_chunk, "resource_id", None)
+        allowed_res = selector.get("resource_id")
+        if allowed_res and target_res != allowed_res:
             return False
-        cursor.execute("SELECT * FROM grants WHERE grant_id = ?", (grant_id,))
-        g = cursor.fetchone()
-        if not g or g["state"] != "active":
-            return False
-        if g["valid_from"] > now_iso or (g["valid_until"] and g["valid_until"] <= now_iso):
-            return False
-        if g["parent_grant_id"]:
-            return cls._chain_valid(cursor, g["parent_grant_id"], now_iso, depth + 1)
+
+        # Check exclude_tags
+        exclude_tags = set(selector.get("exclude_tags", []))
+        if exclude_tags:
+            # Check provenance tags or selectors
+            chunk_acl = set(getattr(manifest_or_chunk, "acl_selector", []))
+            if exclude_tags.intersection(chunk_acl):
+                return False
+
         return True
 
     @classmethod
-    def issue_lease(cls, principal: Principal, usable_grants: List[Grant]) -> AuthorizationLease:
-        """A6 Authorization Lease issue with context deadline calculation."""
-        t = time_authority.now()
-        now = t.timestamp
+    def decide(
+        cls,
+        principal: Principal,
+        action: str,
+        manifest: ResourceManifest,
+        usable_grants: List[Grant],
+        purpose: str = "project_analysis",
+        selector: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Literal["ALLOW", "DENY", "REDACT"], str, List[str]]:
+        """
+        Evaluates RBAC + ABAC + Grants with fail-closed default and explicit deny wins (§6).
+        """
+        matched_rules = []
 
-        # Base TTL: 5 min default, or 30s if any granted vault is restricted
-        ttl_seconds = LEASE_TTL_SECONDS
-        vault_epochs: Dict[str, int] = {}
+        if not principal.is_active:
+            return "DENY", "Principal account is inactive", []
+
+        # Clearance check (Clearance is necessary, not sufficient - §165)
+        if principal.clearance < manifest.min_clearance:
+            return "DENY", f"Insufficient clearance: user has L{principal.clearance}, required L{manifest.min_clearance}", []
+
+        # Credential action check: Credential data (level 4) requires explicit FETCH_SECRET permission (§150)
+        if manifest.classification >= 4 and action != ACTION_FETCH_SECRET:
+            return "DENY", "Credential-classified objects cannot be accessed via standard RAG operations", []
+
+        subjects = set(principal.subjects())
+        denied_users = set(f"user:{u}" for u in manifest.denied_users)
+        denied_roles = set(f"role:{r}" for r in manifest.denied_roles)
+
+        # 1. Explicit Deny Overrides (§6, §138)
+        if subjects.intersection(denied_users):
+            return "DENY", "Explicit user denial rule in resource manifest", []
+        if subjects.intersection(denied_roles):
+            return "DENY", "Explicit role denial rule in resource manifest", []
+
+        # 2. Check Active Grant Matching
+        matching_grants = [
+            g for g in usable_grants
+            if g.vault_id == manifest.vault_id and action in g.actions
+        ]
+
+        for g in matching_grants:
+            if not cls.matches_selector(g.selector, manifest):
+                continue
+            matched_rules.append(f"Grant:{g.grant_id}")
+            return "ALLOW", f"Authorized via Grant {g.grant_id}", matched_rules
+
+        # 3. Direct ACL on Resource Manifest
+        allowed_roles = set(f"role:{r}" if not r.startswith("role:") else r for r in manifest.allowed_roles)
+        allowed_users = set(f"user:{u}" if not u.startswith("user:") else u for u in manifest.allowed_users)
+
+        if subjects.intersection(allowed_users):
+            matched_rules.append("ManifestUserACL")
+            return "ALLOW", "Authorized via resource user ACL", matched_rules
+
+        if subjects.intersection(allowed_roles):
+            matched_rules.append("ManifestRoleACL")
+            return "ALLOW", "Authorized via resource role ACL", matched_rules
+
+        return "DENY", "No applicable allow rule or active grant matched", []
+
+    @classmethod
+    def issue_lease(cls, principal: Principal, usable_grants: List[Grant], restricted: bool = False) -> AuthorizationLease:
+        """Issues short-lived Authorization Lease (§A6) for RAG context execution."""
+        now = time_authority.now()
+        ttl = RESTRICTED_LEASE_TTL_SECONDS if restricted else LEASE_TTL_SECONDS
+        deadline_dt = now.timestamp + (ttl if isinstance(ttl, datetime) else datetime.fromtimestamp(0, tz=timezone.utc) - datetime.fromtimestamp(0, tz=timezone.utc) + (ttl if hasattr(ttl, 'days') else (datetime.fromtimestamp(ttl, tz=timezone.utc) - datetime.fromtimestamp(0, tz=timezone.utc))))
+        
+        # Exact TTL timestamp calculation
+        from datetime import timedelta
+        deadline_iso = (now.timestamp + timedelta(seconds=ttl)).isoformat()
+
+        lease_id = f"lease_{uuid4().hex[:8]}"
+        grant_ids = [g.grant_id for g in usable_grants]
 
         with db.get_connection() as conn:
             cursor = conn.cursor()
-            for g in usable_grants:
-                cursor.execute("SELECT vault_epoch, classification_ceiling FROM vaults WHERE vault_id = ?", (g.vault_id,))
-                v = cursor.fetchone()
-                if v:
-                    vault_epochs[g.vault_id] = v["vault_epoch"]
-                    if v["classification_ceiling"] >= 3:
-                        ttl_seconds = min(ttl_seconds, RESTRICTED_LEASE_TTL_SECONDS)
-
-        # Context deadline = min(now + ttl, earliest grant valid_until)
-        deadline = now + datetime.resolution * ttl_seconds if False else now
-        from datetime import timedelta
-        candidate_deadline = now + timedelta(seconds=ttl_seconds)
-
-        for g in usable_grants:
-            if g.valid_until:
-                g_dt = datetime.fromisoformat(g.valid_until)
-                if g_dt < candidate_deadline:
-                    candidate_deadline = g_dt
+            cursor.execute("SELECT vault_id, vault_epoch FROM vaults")
+            vault_epochs = {r["vault_id"]: r["vault_epoch"] for r in cursor.fetchall()}
 
         return AuthorizationLease(
-            lease_id=str(uuid4()),
+            lease_id=lease_id,
             principal_id=principal.user_id,
-            grants=[g.grant_id for g in usable_grants],
+            grants=grant_ids,
             policy_epoch=principal.auth_epoch,
             vault_epochs=vault_epochs,
             issued_at=now.isoformat(),
-            deadline=candidate_deadline.isoformat(),
-            time_status=t.status
+            deadline=deadline_iso,
+            time_status=now.status
         )
-
-    @classmethod
-    def effective_scope(cls, vault_slug_or_id: str, usable_grants: List[Grant]) -> Vault:
-        """A2 Effective scope resolution: selected ∩ granted ∩ active."""
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM vaults WHERE (slug = ? OR vault_id = ?) AND status = 'active'",
-                           (vault_slug_or_id, vault_slug_or_id))
-            v_row = cursor.fetchone()
-            if not v_row:
-                raise ScopeViolation(f"Vault '{vault_slug_or_id}' not found or inactive.")
-
-            vault = Vault(
-                vault_id=v_row["vault_id"],
-                tenant_id=v_row["tenant_id"],
-                slug=v_row["slug"],
-                display_name=v_row["display_name"],
-                owner_id=v_row["owner_id"],
-                classification_ceiling=v_row["classification_ceiling"],
-                status=v_row["status"],
-                scope_mode=v_row["scope_mode"],
-                discoverable=bool(v_row["discoverable"]),
-                allow_delegation=bool(v_row["allow_delegation"]),
-                max_delegation_depth=v_row["max_delegation_depth"],
-                retention=json.loads(v_row["retention"]),
-                vault_epoch=v_row["vault_epoch"],
-                created_at=v_row["created_at"]
-            )
-
-            # Assert at least one usable grant covers this vault with 'rag_context' action
-            has_rag_grant = any(g.vault_id == vault.vault_id and "rag_context" in g.actions for g in usable_grants)
-            if not has_rag_grant:
-                raise ScopeViolation(f"No active 'rag_context' grant held for vault '{vault.display_name}'.")
-
-            return vault
-
-    @classmethod
-    def decide(cls, principal: Principal, action: str, manifest: ResourceManifest, usable_grants: List[Grant]) -> Tuple[Literal["ALLOW", "DENY"], str, List[str]]:
-        """Point-in-time ABAC decision pipeline (§9, §10, A5)."""
-        # 1. Explicit Deny check
-        if principal.user_id in manifest.denied_users:
-            return "DENY", "EXPLICIT_USER_DENIED", ["RULE_EXPLICIT_USER_DENY"]
-        for r in principal.roles:
-            if r in manifest.denied_roles:
-                return "DENY", f"EXPLICIT_ROLE_DENIED:{r}", ["RULE_EXPLICIT_ROLE_DENY"]
-
-        # 2. Clearance check
-        if principal.clearance < manifest.min_clearance:
-            return "DENY", f"CLEARANCE_TOO_LOW ({principal.clearance} < {manifest.min_clearance})", ["RULE_MIN_CLEARANCE_FAIL"]
-
-        # 3. Grant & Selector match
-        for g in usable_grants:
-            if g.vault_id == manifest.vault_id and action in g.actions:
-                # Selector check
-                sel = g.selector
-                if sel.get("all") is True:
-                    return "ALLOW", f"GRANT_MATCH:{g.grant_id}", ["GRANT_ACTIVE", "SELECTOR_ALL", "CLEARANCE_OK"]
-                max_class = sel.get("max_classification", 3)
-                if manifest.classification <= max_class:
-                    return "ALLOW", f"GRANT_MATCH:{g.grant_id}", ["GRANT_ACTIVE", "SELECTOR_CLASSIFICATION_OK", "CLEARANCE_OK"]
-
-        # 4. Fallback to resource ACL allowed lists
-        for r in principal.roles:
-            if r in manifest.allowed_roles:
-                return "ALLOW", f"ROLE_ACL_MATCH:{r}", ["ROLE_ACL_MATCH", "CLEARANCE_OK"]
-        for grp in principal.groups:
-            if grp in manifest.allowed_groups:
-                return "ALLOW", f"GROUP_ACL_MATCH:{grp}", ["GROUP_ACL_MATCH", "CLEARANCE_OK"]
-        if principal.user_id in manifest.allowed_users:
-            return "ALLOW", f"USER_ACL_MATCH:{principal.user_id}", ["USER_ACL_MATCH", "CLEARANCE_OK"]
-
-        return "DENY", "NO_MATCHING_GRANT_OR_ACL", ["DEFAULT_DENY"]

@@ -49,11 +49,15 @@ personaSelect.addEventListener("change", async (e) => {
 
 async function switchPersona(username) {
   try {
-    const res = await fetch(`${API_BASE}/api/auth/switch-persona`, {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username })
+      body: JSON.stringify({ username, password: `${username}123` })
     });
+    if (!res.ok) {
+      console.error("Login failed for persona:", username);
+      return;
+    }
     const data = await res.json();
     state.token = data.access_token;
     state.principal = data.principal;
@@ -562,8 +566,13 @@ document.getElementById("runAllTestsBtn").addEventListener("click", runSecurityT
 
 // Helpers
 function escapeHtml(str) {
-  if (!str) return "";
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 // Initial Bootstrap

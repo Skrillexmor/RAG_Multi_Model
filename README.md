@@ -1,137 +1,164 @@
-# Secure Multi-Modal RAG System with Data-Level Authorization (v3.0)
+# DARS-RAG: Data-Authorization & Retrieval Security RAG (v4.0)
 
-> **LAN-First • Zero-Cloud • Local-LLM • Two-Gate Retrieval Firewall • Cryptographic Audit Chain**
-
----
-
-## 1. Executive Summary
-
-This project implements a **Data-Authorization-First Retrieval-Augmented Generation (RAG) system** engineered for zero-trust private Local Area Networks (LAN). 
-
-Unlike standard RAG chatbots where authorization is merely checked at user login or filtered in the client UI, this architecture enforces **Data-Level Authorization**:
-1. **The data itself carries authorization policy:** Every PDF page, OCR image region, and database row has an immutable Authorization Manifest, classification level, and ACL selector.
-2. **Two-Gate Retrieval Firewall:**
-   - **Gate A (Vector Pre-Filter):** The server's Policy Compiler translates active Ed25519-signed grants into mandatory payload filters before any vector candidate lookup occurs. Client-supplied filters are rejected.
-   - **Gate B (Post-Retrieval Canonical Gate):** Candidates are authoritatively re-checked against SQL Row-Level Security, latest ACL version, and context deadline before text enters model context.
-3. **Architecture v3 Scoped Vaults:** Every piece of data belongs to a named **Vault** (e.g. `Finance-Q3`, `HR-Policies-2026`). A RAG scope works *strictly on that data*.
-4. **Time-Bound Grants & Attenuated Delegation:** Permissions are granted with hard deadlines, schedules, and atomic quotas. Delegation only attenuates permissions (child ⊆ parent).
-5. **Trusted Time Authority:** Detects clock rollback and clock jump attacks in disconnected offline environments.
-6. **Citation-First Contract:** Answers are strictly grounded in authorized evidence. Quotes are verified character-for-character against canonical sources, or the answer is refused (`CLOSED-WORLD REFUSAL`).
-7. **Cryptographic Audit Chain:** Every decision is logged with SHA-256 hash chaining `H(n) = SHA256(H(n-1) || canonical_event)`, proving complete tamper evidence.
+> **Offline-Native • Zero-Cloud • Data-Centric Authorization • Two-Gate Retrieval Firewall • AES-256-GCM Storage • 84/84 Pass Security Suite**
 
 ---
 
-## 2. Quickstart
+## 1. Executive Summary & Core Invariant
+
+**DARS-RAG** is an offline, LAN-native, multi-modal Retrieval-Augmented Generation (RAG) platform where **authorization travels with the data**. 
+
+Unlike conventional RAG applications where permissions are checked only at login or simulated via system prompts, DARS-RAG enforces the absolute security invariant:
+
+$$\text{LLM\_CONTEXT}(u, q, t, p, d) \subseteq \text{AUTHORIZED\_EVIDENCE}(u, q, t, p, d)$$
+
+> **Absolute Rule:** Unauthorized information never enters LLM context, vector payloads, citations, downloads, or logs. The LLM is not an authorization mechanism; data is authorized deterministically before retrieval and rechecked before delivery.
+
+---
+
+## 2. Architecture & The Two-Gate Retrieval Firewall
+
+```text
+AUTHENTICATED USER (Argon2id + JWT + Auth Epoch)
+        ↓
+ROLE + CLEARANCE + CURRENT USABLE GRANTS
+        ↓
+DATASET / RAG WORKSPACE SCOPE (Private by Default)
+        ↓
+TIME + PURPOSE + SCHEDULE + OPERATION VALIDATION
+        ↓
+[GATE A] SERVER-COMPILED RETRIEVAL FILTER (Ed25519 Signed)
+        ↓
+PERSISTENT QDRANT VECTOR CANDIDATES (Deterministic UUID5, No Plaintext)
+        ↓
+[GATE B] CANONICAL AUTHORIZATION RECHECK
+  ├── Fresh Database Manifest & Policy Revalidation
+  ├── AES-256-GCM Canonical Decryption via Vault KEK
+  └── SHA-256 Content Hash Verification
+        ↓
+AUTHORIZED EVIDENCE ENVELOPE (With Expiration & Proof Object)
+        ↓
+LOCAL LLM REASONING (<UNTRUSTED_EVIDENCE_DATA> Delimiters)
+        ↓
+STRICT CLAIM & CITATION GROUNDING VALIDATION
+        ↓
+OUTPUT FIREWALL / DLP SCANNER
+        ↓
+CLIENT DELIVERY (CSP-Protected, Safe DOM)
+```
+
+---
+
+## 3. Key Hardened Security Capabilities
+
+| Security Area | Implementation & Invariant | Status |
+|---|---|:---:|
+| **Authentication** | Argon2id password hashing + JWT with `auth_epoch` revocation. Zero fallback; unauthenticated requests return HTTP 401. | **VERIFIED** |
+| **Persona Switching** | Removed from production routes. Bound to `DEMO_MODE=true` on localhost. | **VERIFIED** |
+| **Workspace Scope** | Workspaces default to `PRIVATE`. Explicit sharing grants required to expand scope. | **VERIFIED** |
+| **Gate A (Vector Pre-Filter)** | Server compiles and cryptographically signs AST with Ed25519; arbitrary client filters are rejected. | **VERIFIED** |
+| **Vector Storage** | Persistent disk Qdrant storage (`data/qdrant_storage`). Payload contains only metadata; zero plaintext source text. | **VERIFIED** |
+| **Gate B (Canonical Store)** | Decrypts canonical chunks from AES-256-GCM storage with vault KEK; verifies content hash and SQL policy. | **VERIFIED** |
+| **Structured Data & RLS** | Row-Level Security (RLS) and field projection: unauthorized columns (`salary`, `bank_account`) are completely omitted from results without schema leakage. | **VERIFIED** |
+| **Grants & Delegation** | Monotonic attenuation (child $\subseteq$ parent actions, time, selectors). Recursive cascade revocation bumps vault epoch immediately. | **VERIFIED** |
+| **JIT Access Requests** | Separation of Duties (requester cannot self-approve). Requires authorized dataset stewards/owners; supports N-of-M multi-approvals. | **VERIFIED** |
+| **Citation Grounding** | Validates exact canonical quotes. Zero-exception policy (no short-quote bypass). Fabricated citations cause immediate refusal. | **VERIFIED** |
+| **Prompt Injection & DLP** | Isolated `<UNTRUSTED_EVIDENCE_DATA>` blocks. Output DLP blocks private keys and passwords before response delivery. | **VERIFIED** |
+| **Audit & Integrity** | Append-only audit log file + SHA-256 hash chaining + Ed25519 signed checkpoints. | **VERIFIED** |
+| **Offline & Zero-Cloud** | `ALLOW_EXTERNAL_EGRESS=False`. Local FastEmbed neural embeddings, local Ollama LLM, local disk storage. | **VERIFIED** |
+
+---
+
+## 4. Quickstart Guide
 
 ### Prerequisites
 - Python 3.10+
-- Modern Web Browser (Edge / Chrome / Firefox)
+- Modern Web Browser (Chrome / Edge / Firefox)
+- Optional: Local Ollama running `qwen2.5:3b` (system falls back to `SAFE_EXTRACTIVE_MODE` if LLM is offline)
 
-### Installation & Run
+### Step 1: Install Dependencies
+```bash
+pip install -r requirements.txt
+```
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+### Step 2: Seed the Demo Database & Encrypted Storage
+```bash
+python scripts/seed_demo_data.py --reset-demo
+```
+*Seeds users, mixed-security dataset (`Project Alpha`), structured employee records with RLS, and generates AES-256-GCM encrypted canonical files.*
 
-2. **Seed the database with demo users, vaults, multi-modal files, and signed grants:**
-   ```bash
-   python scripts/seed_demo_data.py
-   ```
+**Demo Credentials:**
+- `alice` / `alice123` (Data Owner & Finance Lead, L2)
+- `bob` / `bob123` (HR Specialist, L2)
+- `charlie` / `charlie123` (Engineer, L1)
+- `diana` / `diana123` (Security Admin, L3)
+- `eve` / `eve123` (Guest / Untrusted Viewer, L0)
 
-3. **Run the 15-test automated security verification suite:**
-   ```bash
-   python scripts/run_all_security_tests.py
-   ```
+### Step 3: Run the Automated Security Verification Matrix (84 Tests)
+Run either via `pytest` or the standalone security CLI runner:
+```bash
+python -m pytest backend/tests/test_security_matrix.py
+# OR
+python scripts/run_all_security_tests.py
+```
+**Expected Result:** `84 passed / 0 failed (100% PASS)`.
 
-4. **Start the Secure RAG Gateway:**
-   ```bash
-   python -m backend.app.main
-   ```
+### Step 4: Verify Zero-Cloud Offline Invariants
+```bash
+python scripts/verify_offline.py
+```
+**Expected Result:** `100% OFFLINE / LAN-NATIVE INVARIANTS SATISFIED (ZERO CLOUD)`.
 
-5. **Open the Web UI:**
-   Navigate to [http://localhost:8000](http://localhost:8000) in your browser.
+### Step 5: Start the API Gateway & Frontend
+```bash
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+Open your browser to: **[http://localhost:8000](http://localhost:8000)**
 
 ---
 
-## 3. Demo Persona Walkthrough
+## 5. Security Test Suite Breakdown (84/84 PASS)
 
-Use the **Persona Switcher** in the top navigation bar to test each role against the same corpus:
-
-| Persona | Role & Clearance | Granted Vaults | What Happens on Query |
-|---|---|---|---|
-| **Alice** | Finance Analyst (L2) | `Finance-Q3`, `Company-Public` | ✅ Retrieves Q3 budget & allocations.<br>❌ Asking for Bob's salary yields **Zero leaks / Refusal**.<br>❌ Cross-vault query to `HR-Policies-2026` is blocked at Scope Gate. |
-| **Bob** | HR Specialist (L2) | `HR-Policies-2026`, `Company-Public` | ✅ Retrieves compensation bands and HR benefits.<br>❌ Cannot access Finance Q3 internal vendor margins. |
-| **Charlie** | Engineering Analyst (L2) | `Engineering-Core`, `Company-Public` | ✅ Retrieves offline network topology and crypto specs.<br>❌ Cannot access HR or Finance data. |
-| **Diana** | Security Admin (L3) | All Vaults | ✅ Can inspect all data compartments, audit logs, and approve JIT access requests. |
-| **Eve** | Untrusted Contractor (L0) | `Company-Public` only | ❌ Attempting to query any internal vault is immediately refused. |
-
----
-
-## 4. Automated Security Test Matrix (15/15 Pass)
-
-Run `python scripts/run_all_security_tests.py` or click **"Run Security Test Suite"** in the UI:
-
-| Test ID | Security Invariant / Attack | Result | Proof Mechanism |
+| Test Category | ID Range | Count | Invariants Verified |
 |---|---|:---:|---|
-| `T-AUTH-005` | Policy Epoch Invalidation | **PASS** | Session invalidated upon monotonic epoch bump |
-| `T-RET-001` | Pre-Retrieval Vector Isolation | **PASS** | Zero unauthorized HR chunks returned to Finance Analyst |
-| `T-RET-003` | Client Filter Tamper Rejection | **PASS** | `SecurityContractViolation` on ad-hoc filter |
-| `T-RET-006` | Canonical Gate Authoritative Check | **PASS** | Secondary SQL RLS blocks unentitled resource |
-| `T-CIT-002` | Fake Citation ID Rejection | **PASS** | `FORBIDDEN_SOURCE` status returned |
-| `T-CIT-004` | Fabricated Quote Verification | **PASS** | Exact quote matching detects ungrounded hallucination |
-| `T-INJ-001` | Direct Prompt Injection Defense | **PASS** | Prompt injection keyword detected and refused |
-| `T-INJ-002` | Indirect Untrusted Data Containment | **PASS** | Document-embedded injection sanitized and neutralized |
-| `T-EXF-001` | Cross-Vault Scope Isolation (Rule S2) | **PASS** | `ScopeViolation` when querying ungranted vault |
-| `T-V3-TIME-001` | Time-Enforced Grant Expiry | **PASS** | Expired grants rejected at use time |
-| `T-V3-TIME-002` | Trusted Time Monotonic Rollback Defense | **PASS** | Clock rollback detected, status set to `CLOCK_ROLLBACK` |
-| `T-V3-SOD-001` | Separation of Duties (Four-Eyes Rule) | **PASS** | Requester cannot approve their own JIT request |
-| `T-V3-DEL-001` | Delegation Attenuation Rule (D1) | **PASS** | Escalated action rejected by delegation validator |
-| `T-V3-CASCADE-001` | Cascade Revocation Consistency | **PASS** | Revoking parent immediately invalidates child grants |
-| `T-V3-AUDIT-001` | Cryptographic Hash Chain Integrity | **PASS** | Unbroken SHA-256 hash chain verified |
+| **Authentication** | `AUTH-001..010` | 10 | Argon2id verification, 401 fail-closed, expired tokens, auth epoch revocation, signature tampering. |
+| **Dataset Scope** | `SCOPE-001..007` | 7 | Private-by-default, cross-tenant isolation, client override rejection, hidden vaults. |
+| **Retrieval Firewall** | `RET-001..012` | 12 | Pre-retrieval vector isolation, Gate B canonical recheck, policy epoch mismatch, payload minimization. |
+| **Structured Data & RLS** | `DB-001..008` | 8 | Row-level clearance, field projection (redacting salary/bank account), role denial overrides, record provenance. |
+| **Grants & Delegation** | `GRANT-001..014` | 14 | Attenuation (actions, time, selectors), cascade revocation, SoD self-approval block, canonical signature check. |
+| **Citations & Grounding** | `CIT-001..010` | 10 | Exact canonical quote matching, zero short-quote loopholes, citation-to-envelope binding, fabricated claim block. |
+| **Prompt Injection & DLP** | `INJ-001..008` | 8 | Direct injection refusal, indirect evidence containment, credential secret scanning (AWS AKIA, private keys, passwords). |
+| **Storage Security** | `STORE-001..006` | 6 | AES-256-GCM chunk file encryption, quarantine file upload validation, cascading deletion, deterministic UUID5 IDs. |
+| **Federation & LAN** | `LAN-001..006` | 6 | Encrypted signed bundle export, tampered payload rejection, replay protection nonce store, recipient binding. |
+| **Audit Integrity** | `AUDIT-001..003` | 3 | Immutable SHA-256 hash chain verification, tamper detection, signed Ed25519 audit checkpoints. |
+| **TOTAL** | — | **84** | **84 PASSED / 0 FAILED** |
 
 ---
 
-## 5. Repository Structure
+## 6. Live Hackathon Demonstration Scenarios
 
-```
-d:/RAG/
-├── backend/
-│   ├── app/
-│   │   ├── config.py             # System paths, keys & constants
-│   │   ├── time_authority.py     # Trusted Time Authority (A7, V9)
-│   │   ├── crypto.py             # AES-256-GCM, Ed25519, SHA-256 hash chains
-│   │   ├── models.py             # Pydantic schemas (Principal, Vault, Grant, Proof)
-│   │   ├── database.py           # Relational SQLite engine with RLS abstractions
-│   │   ├── policy_engine.py      # Usable grants, ABAC pipeline, Scope resolution
-│   │   ├── policy_compiler.py    # Compiler for Gate A Vector payload filter AST
-│   │   ├── vector_store.py       # Vector index with contract tests & cosine ranking
-│   │   ├── canonical_gate.py     # Gate B Canonical database check & proof generation
-│   │   ├── ingestion.py          # Multi-modal PDF, OCR image & DB row ingestion
-│   │   ├── local_llm.py          # Local generation adapter with closed-world refusal
-│   │   ├── citation_validator.py # Exact quote verification & claim grounding
-│   │   ├── audit.py              # Hash-chained append-only event store
-│   │   ├── access_service.py     # JIT access requests, approvals & delegation
-│   │   ├── federation.py         # Tier 2 Query-in-Place & Tier 3 .rvault bundles
-│   │   ├── api.py                # FastAPI REST router
-│   │   └── main.py               # Application entrypoint
-│   └── tests/
-│       └── test_security_matrix.py # 15 Automated Security Invariant Tests
-├── frontend/
-│   ├── index.html                # Single Page App interface
-│   ├── index.css                 # Dark-mode glassmorphic design system
-│   └── app.js                    # Dynamic UI logic & trace inspector
-├── scripts/
-│   ├── seed_demo_data.py         # Multi-modal dataset & grant seeder
-│   └── run_all_security_tests.py # CLI security test runner
-├── docker-compose.yml            # Network-segmented container architecture
-├── Dockerfile                    # Container definition
-├── requirements.txt              # Python requirements
-└── README.md                     # Complete project documentation
-```
+### Scenario A: Mixed-Security Document Isolation
+1. Login as **Alice** (`alice123`). Query: *"What is the approved budget for Q3?"*
+   - Allowed: Alice has finance clearance; answer with verified citations `[C1]` is returned.
+2. Login as **Charlie** (`charlie123` - Engineer). Query: *"What is the approved budget for Q3?"*
+   - Refused: Charlie has only Engineering access. Gate A excludes Finance chunks before vector search.
+3. Query: *"What is the lead engineer salary?"*
+   - Refused: Salary is RESTRICTED (Level 3) with explicit role denial for engineers.
+
+### Scenario B: Temporary Access & Expiry
+1. Alice issues a 10-minute temporary grant to Charlie for `Finance-Q3`.
+2. Charlie queries the budget: **ALLOWED**.
+3. Advance simulated time or wait for expiry: Charlie queries again: **DENIED (FAIL-CLOSED)**.
+
+### Scenario C: Delegation Attenuation & Cascade Revocation
+1. Alice delegates a grant to Bob with `DELEGABLE=true`.
+2. Bob delegates to Charlie with reduced permissions.
+3. Alice revokes Bob's grant: Charlie's descendant grant is **immediately and recursively invalidated**; vault epoch is incremented.
 
 ---
 
-## 6. Security Invariant Statement
+## 7. Known Limitations & Threat Model Boundaries
 
-> **"The LLM does not decide what the user is allowed to know. The deterministic Retrieval Firewall and Canonical Gate decide what evidence the LLM is allowed to see."**
+1. **Hardware Security Modules (HSM):** This implementation uses local filesystem-protected master keys (`data/.master_kek.hex`, `data/.jwt_secret`) derived via RFC 5869 HKDF. It does not replace a dedicated FIPS 140-2 hardware HSM.
+2. **Grounding Verification:** Grounding is deterministic provenance verification (exact quote matching, character span verification, and closed-world refusal). It verifies provenance and evidence support, not mathematical truth of external real-world assertions.
+3. **Local LLM Performance:** When running on low-resource machines (< 4 GB VRAM), local generation latency depends on Ollama quantization. In the absence of an active Ollama instance, the gateway transparently operates in `SAFE_EXTRACTIVE_MODE`.

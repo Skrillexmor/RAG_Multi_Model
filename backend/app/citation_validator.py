@@ -5,8 +5,10 @@ ValidationStatus = Literal["VALID", "INVALID_CITATION", "UNSUPPORTED_CLAIM", "FO
 
 class CitationValidator:
     """
-    Architecture §25, §26, §27 & Master Spec §17, §25, §26: Citation-First Generation Validator.
-    Enforces exact quote verification, authorized source membership, and claim coverage.
+    Architecture §25, §26, §27 & Master Spec §17, §25, §26 & UPGRADE_PROJECT §62..§65:
+    Strict claim/citation grounding validator.
+    Enforces exact quote verification (zero exceptions for short quotes - CIT-004),
+    authorized source membership, and claim coverage.
     """
 
     @classmethod
@@ -20,9 +22,8 @@ class CitationValidator:
         Validates citations against authorized evidence.
         Returns: (is_valid, status, reason, updated_citations)
         """
-        # Map authorized evidence IDs and their full texts
         evidence_map: Dict[str, str] = {ev.evidence_id: ev.content for ev in authorized_evidence}
-        citation_map: Dict[str, Citation] = {c.citation_id: c for c in citations}
+        citation_map: Dict[str, Citation] = {}
 
         if not citations and claims:
             return False, "UNSUPPORTED_CLAIM", "Factual claims were made without citations (T-CIT-001).", citations
@@ -37,21 +38,21 @@ class CitationValidator:
 
             canonical_text = evidence_map[c.evidence_id]
 
-            # Exact quote verification algorithm (§26, T-CIT-004)
+            # Exact quote verification algorithm (§26, §63, T-CIT-004)
             # Normalize whitespace for robust comparison
             norm_quote = " ".join(c.quote.lower().split())
             norm_canonical = " ".join(canonical_text.lower().split())
 
-            if norm_quote not in norm_canonical and len(norm_quote) > 10:
-                # Fabricated quote check
-                return False, "INVALID_CITATION", f"Fabricated quote in citation {c.citation_id}: quote not found in canonical source.", citations
+            # CIT-004: Removed 'len > 10' loophole! Even short quotes must exist in canonical source.
+            if norm_quote not in norm_canonical:
+                return False, "INVALID_CITATION", f"Fabricated quote in citation {c.citation_id}: quote does not exist in canonical source.", citations
 
             # Mark verified
             c_copy = c.model_copy(update={"verified": True})
             updated_citations.append(c_copy)
             citation_map[c.citation_id] = c_copy
 
-        # 2. Validate claim coverage (§27, T-CIT-006)
+        # 2. Validate claim coverage (§27, §64, T-CIT-006)
         for cl in claims:
             if not cl.citation_ids:
                 return False, "UNSUPPORTED_CLAIM", "Claim without citation ID found.", updated_citations
