@@ -177,10 +177,13 @@ export const ChatView: React.FC<ChatViewProps> = ({ onRequestAccess }) => {
                   <span className="font-medium text-foreground">PrivateRAG</span>
                   <span className="text-muted-foreground/40">·</span>
                   <span className="text-[11px] animate-pulse">
-                    Enforcing Gate A & Gate B authorization invariants...
+                    Retrieving authorized sources & generating response with Local LLM...
                   </span>
                 </div>
-                <div className="h-12 rounded-xl bg-surface-subtle/50 border border-border/40 animate-pulse" />
+                <div className="h-14 rounded-xl bg-surface-subtle/50 border border-border/40 flex items-center px-4 gap-3 animate-pulse">
+                  <div className="h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span className="text-xs text-muted-foreground font-mono">Local model thinking and verifying citations...</span>
+                </div>
               </div>
             )}
 
