@@ -242,6 +242,9 @@ class RetrievalSecurityTrace(BaseModel):
     generation_mode: Literal["LLM_GROUNDED", "SAFE_EXTRACTIVE_MODE", "ANSWER_BLOCKED"] = "LLM_GROUNDED"
     answer_status: Literal["GROUNDED", "REFUSED", "CITATION_MISMATCH", "SAFE_EXTRACTIVE"]
     refusal_reason: Optional[str] = None
+    gate_a: Optional[Dict[str, Any]] = None
+    gate_b: Optional[Dict[str, Any]] = None
+    grounding: Optional[Dict[str, Any]] = None
 
 class QueryResponse(BaseModel):
     query: str

@@ -195,11 +195,11 @@ export const MessageItem: React.FC<MessageItemProps> = ({
               <span>
                 Gate A:{" "}
                 <span className="font-mono text-foreground">
-                  {message.securityTrace.gate_a.candidates_count}
+                  {message.securityTrace.gate_a?.candidates_count ?? (message.securityTrace as any).gate_a_candidates_count ?? 0}
                 </span>{" "}
                 candidates · Gate B:{" "}
                 <span className="font-mono text-foreground">
-                  {message.securityTrace.gate_b.authorized_count}
+                  {message.securityTrace.gate_b?.authorized_count ?? (message.securityTrace as any).gate_b_canonical_verified_count ?? 0}
                 </span>{" "}
                 authorized
               </span>

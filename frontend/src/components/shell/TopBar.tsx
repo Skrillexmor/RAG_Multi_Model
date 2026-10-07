@@ -1,4 +1,3 @@
-import React from "react"
 import {
   Shield,
   Search,
@@ -9,6 +8,9 @@ import {
   Lock,
   PanelLeftClose,
   PanelLeftOpen,
+  Cpu,
+  LogIn,
+  UserPlus,
 } from "lucide-react"
 import { useApp } from "../../context/AppContext"
 import { DEMO_PERSONAS } from "../../lib/personas"
@@ -36,6 +38,9 @@ export const TopBar: React.FC = () => {
     setCommandPaletteOpen,
     currentView,
     navigate,
+    llmStatus,
+    setIsLlmModalOpen,
+    setIsAuthModalOpen,
   } = useApp()
 
   // Format lease seconds
@@ -110,7 +115,24 @@ export const TopBar: React.FC = () => {
       </div>
 
       {/* Right: Security & Network Telemetry + Persona */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2">
+        {/* Local Offline LLM Status Chip */}
+        <button
+          type="button"
+          onClick={() => setIsLlmModalOpen(true)}
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
+            llmStatus?.connected
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20"
+              : "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
+          }`}
+          title="Click to view Local LLM status, setup guide, and model commands"
+        >
+          <Cpu className="h-3 w-3" />
+          <span>
+            {llmStatus?.connected ? `Ollama (${llmStatus.active_model})` : "Local LLM: Safe Extractive"}
+          </span>
+        </button>
+
         {/* Offline LAN Telemetry */}
         <div
           className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-border text-[11px] text-muted-foreground"
@@ -170,6 +192,25 @@ export const TopBar: React.FC = () => {
                 </p>
               </div>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+
+            {/* Custom Account & LLM Actions */}
+            <DropdownMenuItem
+              onClick={() => setIsAuthModalOpen(true)}
+              className="flex items-center gap-2 py-1.5 text-xs cursor-pointer font-medium text-emerald-400"
+            >
+              <LogIn className="h-3.5 w-3.5" />
+              <span>Sign In / Register User</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              onClick={() => setIsLlmModalOpen(true)}
+              className="flex items-center gap-2 py-1.5 text-xs cursor-pointer text-foreground"
+            >
+              <Cpu className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Local LLM Setup & Models</span>
+            </DropdownMenuItem>
+
             <DropdownMenuSeparator />
 
             <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">

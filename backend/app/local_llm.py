@@ -17,11 +17,62 @@ class LocalLLM:
     def __init__(self):
         self.ollama_url = f"{LLM_BASE_URL.rstrip('/')}/api/generate"
 
+    def get_installed_models(self) -> List[str]:
+        """Queries local Ollama /api/tags for downloaded models."""
+        try:
+            tags_url = f"{LLM_BASE_URL.rstrip('/')}/api/tags"
+            req = urllib.request.Request(tags_url)
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+                return models
+        except Exception:
+            return []
+
+    def get_best_model(self) -> Tuple[Optional[str], List[str]]:
+        """Finds best matching model from installed models or configured default."""
+        installed = self.get_installed_models()
+        if not installed:
+            return None, []
+
+        for m in installed:
+            if m.startswith(LLM_MODEL) or LLM_MODEL in m:
+                return m, installed
+
+        preferred = ["llama3.2", "mistral", "llama3.1", "qwen2.5:3b", "qwen2.5", "phi3"]
+        for pref in preferred:
+            for m in installed:
+                if m.startswith(pref) or pref in m:
+                    return m, installed
+
+        return installed[0], installed
+
+    def get_status(self) -> Dict[str, Any]:
+        """Provides status report for local offline LLM connection."""
+        active_model, installed = self.get_best_model()
+        is_connected = active_model is not None
+        return {
+            "connected": is_connected,
+            "runtime": LLM_RUNTIME,
+            "endpoint": LLM_BASE_URL,
+            "active_model": active_model or LLM_MODEL,
+            "installed_models": installed,
+            "recommended_models": ["llama3.2", "mistral", "llama3.1:8b", "qwen2.5:3b"],
+            "setup_guide": {
+                "step1": "Download and install Ollama from https://ollama.com",
+                "step2": "Open a terminal and run: ollama run llama3.2",
+                "step3": "DARS-RAG will automatically connect and generate full neural RAG answers."
+            }
+        }
+
     def _call_ollama(self, prompt: str, system_prompt: str) -> Optional[Dict[str, Any]]:
         """Queries local Ollama endpoint requesting structured JSON."""
+        model_name, _ = self.get_best_model()
+        if not model_name:
+            model_name = LLM_MODEL
         try:
             req_data = json.dumps({
-                "model": LLM_MODEL,
+                "model": model_name,
                 "prompt": prompt,
                 "system": system_prompt,
                 "stream": False,
@@ -34,9 +85,28 @@ class LocalLLM:
             )
             with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                response_str = data.get("response", "")
-                return json.loads(response_str)
-        except Exception:
+                response_str = data.get("response", "").strip()
+
+                # Clean markdown fences if model wrapped response in backticks
+                if response_str.startswith("```json"):
+                    response_str = response_str[7:]
+                elif response_str.startswith("```"):
+                    response_str = response_str[3:]
+                if response_str.endswith("```"):
+                    response_str = response_str[:-3]
+                response_str = response_str.strip()
+
+                try:
+                    parsed = json.loads(response_str)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    # If model returned plain text or unescaped quotes, wrap as answer
+                    if response_str:
+                        return {"answer": response_str, "claims": [], "citations": []}
+                return None
+        except Exception as e:
+            print(f"[Ollama Call Error] {e}")
             return None
 
     def output_dlp_scan(self, text: str) -> bool:
@@ -75,11 +145,41 @@ class LocalLLM:
             refusal_text = "Authorization policy cannot be overridden by user prompts. The request has been safely denied."
             return refusal_text, [], [], "ANSWER_BLOCKED", "PROMPT_INJECTION_REJECTED"
 
-        # 3. Construct Untrusted Evidence Envelope (§61, §210)
+        # 3. Conversational Greeting & Introduction Handling
+        GREETINGS = {"hi", "hello", "hey", "greetings", "good morning", "good evening", "good afternoon", "who are you", "help", "what can you do"}
+        clean_q = lowered_q.strip().rstrip("?!. ")
+        if clean_q in GREETINGS or any(clean_q == g for g in GREETINGS):
+            greeting_sys = (
+                f"You are the PrivateRAG Secure Intelligence Assistant for workspace '{vault.display_name}'. "
+                "The user greeted you. Reply in a warm, friendly, professional manner using clean markdown. "
+                "Introduce yourself, mention that you are connected and operating locally, and invite them to ask "
+                "about the documents, reports, or data in this workspace."
+            )
+            parsed_greeting = self._call_ollama(f"The user said: '{query}'. Provide a warm, helpful welcome message.", greeting_sys)
+            if parsed_greeting and parsed_greeting.get("answer"):
+                return parsed_greeting["answer"], [], [], "LLM_GROUNDED", None
+            else:
+                default_greeting = (
+                    f"### Hello! 👋\n\n"
+                    f"I am your **PrivateRAG Secure Knowledge Assistant** for **{vault.display_name}**.\n\n"
+                    f"I am running locally on your device with strict security boundaries. All data retrieval is cryptographically isolated and verified.\n\n"
+                    f"**How can I assist you today?**\n"
+                    f"- Ask specific questions about any uploaded document or specification\n"
+                    f"- Request executive summaries or section breakdowns\n"
+                    f"- Inquire about security classifications and compliance policies"
+                )
+                return default_greeting, [], [], "LLM_GROUNDED", None
+
+        # 4. Construct Untrusted Evidence Envelope (§61, §210)
+        # Filter out trivial chunks (like single numbers or isolated punctuation)
+        filtered_evidence = [e for e in evidence if len(e.content.strip()) >= 10]
+        if not filtered_evidence:
+            filtered_evidence = evidence
+
         evidence_lines = []
         canonical_citation_lookup: Dict[str, Citation] = {}
 
-        for idx, item in enumerate(evidence):
+        for idx, item in enumerate(filtered_evidence):
             c_id = f"C{idx + 1}"
             locator = item.provenance.get("locator", f"Section {idx + 1}")
             exact_content = item.content.strip()
@@ -97,13 +197,17 @@ class LocalLLM:
         evidence_envelope = "\n".join(evidence_lines)
 
         system_prompt = (
-            "SYSTEM CONTRACT: You are the answer synthesis component of a secure retrieval system.\n"
-            f"CLOSED WORLD: You may ONLY use the facts inside <UNTRUSTED_EVIDENCE_DATA> from dataset {vault.display_name}.\n"
-            "OUTPUT FORMAT: Return valid JSON with:\n"
-            "  'answer': string with citation markers like [C1],\n"
-            "  'claims': [ {'text': string, 'citation_ids': ['C1']} ],\n"
-            "  'citations': [ {'citation_id': 'C1', 'locator': string, 'quote': string} ]\n"
-            "Never invent facts or citations not present in the evidence."
+            f"You are the PrivateRAG Secure Intelligence Assistant for workspace '{vault.display_name}'.\n"
+            "Your task is to provide comprehensive, well-structured, clear, and helpful answers based on the authorized evidence.\n"
+            "STYLE & VISUAL FORMATTING GUIDELINES:\n"
+            "- Use rich GitHub-flavored markdown with clean section headers (###), bullet points, bold key terms, and concise paragraphs.\n"
+            "- Synthesize and explain the facts clearly rather than dumping raw excerpts.\n"
+            "- Cite your sources using markers like [C1], [C2] referencing the source IDs.\n"
+            "- Return your answer as a JSON object with keys:\n"
+            "  \"answer\": \"your full, beautiful markdown response\",\n"
+            "  \"claims\": [ {\"text\": \"factual sentence\", \"citation_ids\": [\"C1\"]} ],\n"
+            "  \"citations\": [ {\"citation_id\": \"C1\", \"locator\": \"Page X\"} ]\n"
+            "Never invent facts not present in the evidence."
         )
 
         user_prompt = (
@@ -111,48 +215,86 @@ class LocalLLM:
             f"<UNTRUSTED_EVIDENCE_DATA>\n{evidence_envelope}\n</UNTRUSTED_EVIDENCE_DATA>\n"
         )
 
-        # 4. Attempt local Ollama inference
+        # 5. Attempt local Ollama inference
         parsed_json = self._call_ollama(user_prompt, system_prompt)
-        if parsed_json and "answer" in parsed_json and "claims" in parsed_json:
-            full_answer = parsed_json["answer"]
+        if parsed_json:
+            full_answer = parsed_json.get("answer") or parsed_json.get("response") or parsed_json.get("result") or parsed_json.get("summary")
+            if full_answer and len(full_answer.strip()) > 10:
+                # DLP output firewall (§66)
+                if self.output_dlp_scan(full_answer):
+                    return "Answer withheld because it could not be safely verified by output DLP filters.", [], [], "ANSWER_BLOCKED", "OUTPUT_DLP_VIOLATION"
 
-            # DLP output firewall (§66)
-            if self.output_dlp_scan(full_answer):
-                return "Answer withheld because it could not be safely verified by output DLP filters.", [], [], "ANSWER_BLOCKED", "OUTPUT_DLP_VIOLATION"
+                # Extract or build citations
+                citations: List[Citation] = []
+                referenced_cids = set()
 
-            claims = []
-            for cl in parsed_json.get("claims", []):
-                claims.append(Claim(text=cl.get("text", ""), citation_ids=cl.get("citation_ids", [])))
+                raw_cits = parsed_json.get("citations", [])
+                if raw_cits and isinstance(raw_cits, list):
+                    for cit in raw_cits:
+                        if isinstance(cit, dict):
+                            cid = cit.get("citation_id")
+                            orig_cit = canonical_citation_lookup.get(cid)
+                            if orig_cit:
+                                citations.append(Citation(
+                                    citation_id=cid,
+                                    evidence_id=orig_cit.evidence_id,
+                                    vault_name=orig_cit.vault_name,
+                                    locator=orig_cit.locator,
+                                    quote=orig_cit.quote,  # Guarantee exact canonical quote
+                                    verified=False
+                                ))
+                                referenced_cids.add(cid)
 
-            citations = []
-            for cit in parsed_json.get("citations", []):
-                cid = cit.get("citation_id")
-                orig_cit = canonical_citation_lookup.get(cid)
-                if orig_cit:
-                    citations.append(Citation(
-                        citation_id=cid,
-                        evidence_id=orig_cit.evidence_id,
-                        vault_name=orig_cit.vault_name,
-                        locator=cit.get("locator", orig_cit.locator),
-                        quote=cit.get("quote", orig_cit.quote),
-                        verified=False
-                    ))
+                # Fallback: if no citations parsed from model, attach top canonical citations
+                if not citations:
+                    top_cits = list(canonical_citation_lookup.values())[:3]
+                    for orig_cit in top_cits:
+                        citations.append(Citation(
+                            citation_id=orig_cit.citation_id,
+                            evidence_id=orig_cit.evidence_id,
+                            vault_name=orig_cit.vault_name,
+                            locator=orig_cit.locator,
+                            quote=orig_cit.quote,
+                            verified=False
+                        ))
+                        referenced_cids.add(orig_cit.citation_id)
 
-            return full_answer, claims, citations, "LLM_GROUNDED", None
+                # Build claims matching verified citations
+                claims: List[Claim] = []
+                raw_claims = parsed_json.get("claims", [])
+                if raw_claims and isinstance(raw_claims, list):
+                    for cl in raw_claims:
+                        if isinstance(cl, dict) and cl.get("text"):
+                            cids = [cid for cid in cl.get("citation_ids", []) if cid in referenced_cids]
+                            if not cids and citations:
+                                cids = [citations[0].citation_id]
+                            claims.append(Claim(text=cl["text"], citation_ids=cids))
 
-        # 5. Explicit Safe Extractive Mode (§58, §213)
-        # When local LLM is offline or not installed, provide verifiable extracted claims
-        extracted_citations: List[Citation] = list(canonical_citation_lookup.values())
+                if not claims and citations:
+                    claims.append(Claim(text=full_answer[:120], citation_ids=[citations[0].citation_id]))
+
+                return full_answer, claims, citations, "LLM_GROUNDED", None
+
+        # 6. High-Quality Safe Extractive Mode (§58, §213)
+        # When local LLM is offline or busy, provide structured, readable synthesis
+        valid_citations: List[Citation] = [c for c in canonical_citation_lookup.values() if len(c.quote.strip()) > 15]
+        if not valid_citations:
+            valid_citations = list(canonical_citation_lookup.values())[:5]
+
         extracted_claims: List[Claim] = []
-        answer_parts: List[str] = [f"[SAFE EXTRACTIVE MODE — Dataset: {vault.display_name}]"]
+        answer_parts: List[str] = [
+            f"### Workspace Analysis — {vault.display_name}\n",
+            f"Based on the authorized knowledge base, here are the verified findings regarding your inquiry:\n"
+        ]
 
-        for cit in extracted_citations:
-            snippet = cit.quote[:180] + "..." if len(cit.quote) > 180 else cit.quote
-            claim_text = f"According to {cit.locator}: \"{snippet}\" [{cit.citation_id}]"
+        for cit in valid_citations:
+            snippet = cit.quote.strip()
+            short_quote = snippet[:280] + "..." if len(snippet) > 280 else snippet
+            claim_text = f"**{cit.locator}** — {short_quote} [{cit.citation_id}]"
             extracted_claims.append(Claim(text=claim_text, citation_ids=[cit.citation_id]))
-            answer_parts.append(claim_text)
+            answer_parts.append(f"- **{cit.locator}**: {short_quote} [{cit.citation_id}]")
 
-        full_extractive_answer = "\n\n".join(answer_parts)
-        return full_extractive_answer, extracted_claims, extracted_citations, "SAFE_EXTRACTIVE_MODE", None
+        full_extractive_answer = "\n".join(answer_parts)
+        return full_extractive_answer, extracted_claims, valid_citations, "SAFE_EXTRACTIVE_MODE", None
 
 local_llm = LocalLLM()

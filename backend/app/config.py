@@ -60,9 +60,9 @@ DEFAULT_VECTOR_COLLECTION = "secure_chunks"
 
 # Local LLM Runtime configuration
 LLM_RUNTIME = os.getenv("LLM_RUNTIME", "ollama")
-LLM_MODEL = os.getenv("LLM_MODEL", "qwen2.5:3b")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://127.0.0.1:11434")
-LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "10"))
+LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
 MAX_LLM_CONCURRENCY = int(os.getenv("MAX_LLM_CONCURRENCY", "1"))
 
 # Structured Data & Aggregation Privacy

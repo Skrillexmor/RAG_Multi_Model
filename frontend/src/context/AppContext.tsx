@@ -8,6 +8,7 @@ import {
   EvidenceItem,
   RetrievalSecurityTrace,
   TimeStatus,
+  LlmStatus,
 } from "../types"
 import { DEMO_PERSONAS } from "../lib/personas"
 import { api, ApiError } from "../lib/api"
@@ -33,6 +34,16 @@ interface AppContextType {
   persona: DemoPersona
   principal: Principal | null
   switchPersona: (username: string) => Promise<void>
+  loginWithCredentials: (username: string, password?: string) => Promise<void>
+  registerUser: (payload: { username: string; password: string; department?: string; roles?: string[]; clearance?: number }) => Promise<void>
+  isAuthModalOpen: boolean
+  setIsAuthModalOpen: (open: boolean) => void
+
+  // Local LLM Status
+  llmStatus: LlmStatus | null
+  refreshLlmStatus: () => Promise<void>
+  isLlmModalOpen: boolean
+  setIsLlmModalOpen: (open: boolean) => void
 
   // Vaults
   vaults: Vault[]
@@ -89,6 +100,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leaseDeadline, setLeaseDeadline] = useState<string | null>(null)
   const [leaseSecondsRemaining, setLeaseSecondsRemaining] = useState<number>(300)
   const [timeStatus, setTimeStatus] = useState<TimeStatus | null>(null)
+
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false)
+  const [isLlmModalOpen, setIsLlmModalOpen] = useState<boolean>(false)
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null)
 
   const [activeInspector, setActiveInspector] = useState<ActiveInspector>(null)
   const [currentView, setCurrentView] = useState<AppView>("chat")
@@ -184,11 +199,99 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     []
   )
 
-  // 5. Initial Mount
+  // 5. Local LLM status
+  const refreshLlmStatus = useCallback(async () => {
+    try {
+      const res = await api.getLlmStatus()
+      setLlmStatus(res)
+    } catch {
+      // offline / not reachable
+    }
+  }, [])
+
+  // 6. Direct Login & Register
+  const loginWithCredentials = useCallback(async (username: string, password?: string) => {
+    setIsLoadingUser(true)
+    try {
+      const res = await api.login(username, password)
+      setPrincipal(res.principal)
+      const matched = DEMO_PERSONAS.find((p) => p.username === username.toLowerCase())
+      if (matched) {
+        setPersona(matched)
+      } else {
+        setPersona({
+          username: res.principal.username,
+          name: res.principal.username.charAt(0).toUpperCase() + res.principal.username.slice(1),
+          roleTitle: res.principal.roles.join(", "),
+          roles: res.principal.roles,
+          clearanceLevel: res.principal.clearance_level,
+          description: `Active Principal (${res.principal.roles.join(", ")})`,
+          accessibleVaults: []
+        })
+      }
+      setLeaseSecondsRemaining(300)
+      setActiveInspector(null)
+      const vRes = await api.getVaults()
+      setVaults(vRes.vaults || [])
+      if (vRes.vaults?.length) {
+        setSelectedVault(vRes.vaults[0])
+      }
+      const userConversations = storage.getConversations(res.principal.username)
+      setConversations(userConversations)
+      setActiveConversationId(userConversations.length > 0 ? userConversations[0].id : null)
+      setIsAuthModalOpen(false)
+      toast.success(`Signed in as ${res.principal.username}`, {
+        description: `Roles: ${res.principal.roles.join(", ")} · Clearance L${res.principal.clearance_level}`
+      })
+    } catch (err: any) {
+      toast.error(`Login failed: ${err.message}`)
+      throw err
+    } finally {
+      setIsLoadingUser(false)
+    }
+  }, [])
+
+  const registerUser = useCallback(async (payload: { username: string; password: string; department?: string; roles?: string[]; clearance?: number }) => {
+    setIsLoadingUser(true)
+    try {
+      const res = await api.register(payload)
+      setPrincipal(res.principal)
+      setPersona({
+        username: res.principal.username,
+        name: res.principal.username.charAt(0).toUpperCase() + res.principal.username.slice(1),
+        roleTitle: res.principal.roles.join(", "),
+        roles: res.principal.roles,
+        clearanceLevel: res.principal.clearance_level,
+        description: `Registered Principal (${res.principal.roles.join(", ")})`,
+        accessibleVaults: []
+      })
+      setLeaseSecondsRemaining(300)
+      setActiveInspector(null)
+      const vRes = await api.getVaults()
+      setVaults(vRes.vaults || [])
+      if (vRes.vaults?.length) {
+        setSelectedVault(vRes.vaults[0])
+      }
+      setConversations([])
+      setActiveConversationId(null)
+      setIsAuthModalOpen(false)
+      toast.success(`Account registered successfully!`, {
+        description: `Welcome, ${res.principal.username} · Roles: ${res.principal.roles.join(", ")}`
+      })
+    } catch (err: any) {
+      toast.error(`Registration failed: ${err.message}`)
+      throw err
+    } finally {
+      setIsLoadingUser(false)
+    }
+  }, [])
+
+  // 7. Initial Mount
   useEffect(() => {
     initializeAuth(persona).then(() => {
       refreshVaults()
       refreshSystemStatus()
+      refreshLlmStatus()
       setConversations(storage.getConversations(persona.username))
     })
   }, [])
@@ -282,6 +385,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         persona,
         principal,
         switchPersona,
+        loginWithCredentials,
+        registerUser,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        llmStatus,
+        refreshLlmStatus,
+        isLlmModalOpen,
+        setIsLlmModalOpen,
         vaults,
         selectedVault,
         setSelectedVault,

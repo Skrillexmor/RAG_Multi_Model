@@ -13,6 +13,8 @@ import { EvidenceInspector } from "../evidence/EvidenceInspector"
 import { SecurityTraceDrawer } from "../evidence/SecurityTraceDrawer"
 import { CommandPalette } from "../command/CommandPalette"
 import { RequestAccessModal } from "../security/RequestAccessModal"
+import { AuthModal } from "../auth/AuthModal"
+import { LlmAssistantModal } from "../settings/LlmAssistantModal"
 import { Toaster } from "sonner"
 
 export const AppShell: React.FC = () => {
@@ -79,6 +81,12 @@ export const AppShell: React.FC = () => {
           onRequestSubmitted={refreshVaults}
         />
       )}
+
+      {/* Auth & Registration Modal */}
+      <AuthModal />
+
+      {/* Local LLM Setup & Models Modal */}
+      <LlmAssistantModal />
 
       {/* Toast Notification Container */}
       <Toaster

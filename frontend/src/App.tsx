@@ -1,12 +1,15 @@
 import React from "react"
 import { AppProvider } from "./context/AppContext"
 import { AppShell } from "./components/shell/AppShell"
+import { ErrorBoundary } from "./components/common/ErrorBoundary"
 
 export const App: React.FC = () => {
   return (
-    <AppProvider>
-      <AppShell />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <AppShell />
+      </AppProvider>
+    </ErrorBoundary>
   )
 }
 

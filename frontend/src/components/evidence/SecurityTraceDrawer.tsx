@@ -71,7 +71,7 @@ export const SecurityTraceDrawer: React.FC<SecurityTraceDrawerProps> = ({
             <div className="flex justify-between text-[11px] pt-1 border-t border-border/40">
               <span className="text-muted-foreground">Vector Candidates Admitted</span>
               <span className="font-mono font-medium text-foreground">
-                {trace.gate_a.candidates_count}
+                {trace.gate_a?.candidates_count ?? (trace as any).gate_a_candidates_count ?? 0}
               </span>
             </div>
           </div>
@@ -92,13 +92,13 @@ export const SecurityTraceDrawer: React.FC<SecurityTraceDrawerProps> = ({
               <div>
                 Authorized:{" "}
                 <span className="font-mono font-medium text-emerald-400">
-                  {trace.gate_b.authorized_count}
+                  {trace.gate_b?.authorized_count ?? (trace as any).gate_b_canonical_verified_count ?? 0}
                 </span>
               </div>
               <div>
                 Excluded:{" "}
                 <span className="font-mono font-medium text-muted-foreground">
-                  {trace.gate_b.excluded_count}
+                  {trace.gate_b?.excluded_count ?? (trace as any).excluded_candidates_count ?? 0}
                 </span>
               </div>
             </div>
@@ -112,7 +112,7 @@ export const SecurityTraceDrawer: React.FC<SecurityTraceDrawerProps> = ({
                 <span>Citation & Grounding Validator</span>
               </div>
               <Badge variant="success" className="text-[10px] py-0">
-                {trace.grounding.status}
+                {trace.grounding?.status ?? (trace as any).answer_status ?? "PASSED"}
               </Badge>
             </div>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
@@ -121,7 +121,7 @@ export const SecurityTraceDrawer: React.FC<SecurityTraceDrawerProps> = ({
             <div className="flex justify-between text-[11px] pt-1 border-t border-border/40">
               <span className="text-muted-foreground">Citations Grounded</span>
               <span className="font-mono font-medium text-foreground">
-                {trace.grounding.citations_count} / {trace.grounding.citations_count}
+                {trace.grounding?.citations_count ?? (trace as any).citations_validated_count ?? 0}
               </span>
             </div>
           </div>

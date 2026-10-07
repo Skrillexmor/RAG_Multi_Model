@@ -20,6 +20,17 @@ export interface DemoPersona {
   accessibleVaults: string[]
 }
 
+export interface VaultDocument {
+  resource_id: string
+  vault_id: string
+  title: string
+  resource_type: string
+  classification: number
+  status: string
+  chunks_count: number
+  created_at: string
+}
+
 export interface Vault {
   vault_id: string
   slug: string
@@ -32,6 +43,8 @@ export interface Vault {
   created_at: string
   discoverable?: boolean
   document_count?: number
+  chunk_count?: number
+  documents?: VaultDocument[]
 }
 
 export interface Grant {
@@ -185,6 +198,20 @@ export interface TimeStatus {
   status: "OK" | "CLOCK_ROLLBACK" | "CLOCK_JUMP"
   skew_seconds: number
   is_simulated: boolean
+}
+
+export interface LlmStatus {
+  connected: boolean
+  runtime: string
+  endpoint: string
+  active_model: string
+  installed_models: string[]
+  recommended_models: string[]
+  setup_guide: {
+    step1: string
+    step2: string
+    step3: string
+  }
 }
 
 // Conversation and Chat UI types

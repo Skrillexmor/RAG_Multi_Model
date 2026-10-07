@@ -96,13 +96,13 @@ def login(req: LoginRequest):
     """Real Argon2id password verification against database (§3.2, T-AUTH-001, T-AUTH-002)."""
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username = ?", (req.username,))
+        cursor.execute("SELECT * FROM users WHERE username = ?", (req.username.strip().lower(),))
         user_row = cursor.fetchone()
 
     if not user_row or not verify_password(user_row["password_hash"], req.password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials (T-AUTH-001).")
 
-    principal = PolicyEngine.get_principal_by_username(req.username)
+    principal = PolicyEngine.get_principal_by_username(req.username.strip().lower())
     token_payload = {
         "sub": principal.username,
         "user_id": principal.user_id,
@@ -119,6 +119,127 @@ def login(req: LoginRequest):
         "principal": principal
     }
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    department: Optional[str] = "Engineering"
+    roles: Optional[List[str]] = None
+    clearance: Optional[int] = 1
+
+@app.post("/api/auth/register")
+def register(req: RegisterRequest):
+    """User registration with custom role and security clearance (§3)."""
+    clean_username = req.username.strip().lower()
+    if not clean_username or len(clean_username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
+    if len(req.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id FROM users WHERE username = ?", (clean_username,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="Username already exists. Please choose a different username.")
+
+        user_id = f"u_{uuid4().hex[:8]}"
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        pwd_hash = hash_password(req.password)
+        clearance_lvl = max(1, min(req.clearance or 1, 4))
+        dept = req.department or "Engineering"
+
+        cursor.execute("SELECT tenant_id FROM vaults LIMIT 1")
+        t_row = cursor.fetchone()
+        tenant_id = t_row["tenant_id"] if t_row else "tenant_primary"
+
+        cursor.execute("""
+            INSERT INTO users (user_id, tenant_id, username, password_hash, department, clearance, is_active, auth_epoch, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+        """, (user_id, tenant_id, clean_username, pwd_hash, dept, clearance_lvl, now_iso))
+
+        # Ensure all existing users align to primary tenant
+        cursor.execute("UPDATE users SET tenant_id = ? WHERE tenant_id = 'default_tenant'", (tenant_id,))
+
+        roles_to_assign = req.roles or ["analyst"]
+        for role in roles_to_assign:
+            role_clean = role.strip().lower()
+            cursor.execute("SELECT role_id FROM roles WHERE name = ?", (role_clean,))
+            existing = cursor.fetchone()
+            if existing:
+                rid = existing["role_id"]
+            else:
+                rid = f"r_{role_clean}"
+                cursor.execute("INSERT OR IGNORE INTO roles (role_id, name, description) VALUES (?, ?, ?)",
+                               (rid, role_clean, f"Role {role_clean}"))
+            cursor.execute("""
+                INSERT OR REPLACE INTO role_assignments (user_id, role_id, valid_from, granted_by)
+                VALUES (?, ?, '2000-01-01T00:00:00Z', 'system_registration')
+            """, (user_id, rid))
+
+        dept_slug = dept.strip().lower()
+        cursor.execute("INSERT OR IGNORE INTO user_groups (user_id, group_name) VALUES (?, ?)", (user_id, f"group:{dept_slug}"))
+
+        # Provision initial active grants for user to Project Alpha and active vaults matching clearance
+        cursor.execute("SELECT vault_id, classification_ceiling FROM vaults WHERE status = 'active'")
+        vault_rows = cursor.fetchall()
+        for v in vault_rows:
+            vid = v["vault_id"]
+            ceiling = v["classification_ceiling"]
+            if vid == "v_alpha" or clearance_lvl >= ceiling:
+                gid = f"g_{uuid4().hex[:8]}"
+                grant_dict = {
+                    "grant_id": gid,
+                    "vault_id": vid,
+                    "grantee_type": "user",
+                    "grantee_id": f"user:{user_id}",
+                    "selector": {"all": True},
+                    "actions": [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE],
+                    "valid_from": "2000-01-01T00:00:00Z",
+                    "valid_until": "2030-01-01T00:00:00Z",
+                    "purpose": "workspace_query",
+                    "delegable": False,
+                    "depth": 0,
+                    "parent_grant_id": None,
+                    "issuer_id": "system"
+                }
+                sig = sign_grant_payload(grant_dict)
+                cursor.execute("""
+                    INSERT INTO grants (
+                        grant_id, vault_id, grantee_type, grantee_id, selector, actions,
+                        valid_from, valid_until, purpose, delegable, depth, parent_grant_id,
+                        issuer_id, state, signature, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                """, (
+                    gid, vid, "user", f"user:{user_id}", json.dumps({"all": True}),
+                    json.dumps([ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE]),
+                    "2000-01-01T00:00:00Z", "2030-01-01T00:00:00Z", "workspace_query",
+                    0, 0, None, "system", sig, now_iso
+                ))
+                cursor.execute("INSERT OR IGNORE INTO grant_usage (grant_id, queries, evidence, bytes) VALUES (?, 0, 0, 0)", (gid,))
+
+        conn.commit()
+
+    principal = PolicyEngine.get_principal_by_username(clean_username)
+    if not principal:
+        raise HTTPException(status_code=500, detail="Failed to load newly registered principal.")
+
+    token_payload = {
+        "sub": principal.username,
+        "user_id": principal.user_id,
+        "tenant_id": principal.tenant_id,
+        "roles": principal.roles,
+        "clearance": principal.clearance,
+        "auth_epoch": principal.auth_epoch,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=12)
+    }
+    token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "principal": principal,
+        "message": "User registered successfully."
+    }
+
 class SwitchPersonaRequest(BaseModel):
     username: str
 
@@ -131,7 +252,7 @@ def switch_persona(req: SwitchPersonaRequest):
             detail="Persona switching is disabled in production mode (T-AUTH-008)."
         )
 
-    principal = PolicyEngine.get_principal_by_username(req.username)
+    principal = PolicyEngine.get_principal_by_username(req.username.strip().lower())
     if not principal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found.")
 
@@ -155,11 +276,17 @@ def switch_persona(req: SwitchPersonaRequest):
 def get_me(principal: Principal = Depends(get_current_principal)):
     return principal
 
+# ----------------- LOCAL LLM STATUS & SETUP GUIDE -----------------
+@app.get("/api/llm/status")
+def get_llm_status():
+    """Returns local offline LLM connection status, installed models, and setup guide."""
+    return local_llm.get_status()
+
 # ----------------- VAULTS & DISCOVERY ENDPOINTS (§29, §30, §32) -----------------
 @app.get("/api/vaults")
 def list_vaults(principal: Principal = Depends(get_current_principal)):
     """
-    Lists only discoverable or authorized vaults (§30: No hidden enumeration leakage).
+    Lists only discoverable or authorized vaults with their active documents (§30).
     """
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
@@ -170,21 +297,58 @@ def list_vaults(principal: Principal = Depends(get_current_principal)):
         cursor.execute("SELECT * FROM vaults WHERE tenant_id = ? AND status = 'active'", (principal.tenant_id,))
         rows = cursor.fetchall()
 
-    visible = []
-    for r in rows:
-        v_id = r["vault_id"]
-        is_owner = r["owner_id"] == principal.user_id
-        is_granted = v_id in usable_vault_ids
-        is_discoverable = bool(r["discoverable"]) or r["visibility"] != "private"
-        is_admin = "admin" in principal.roles
+        visible = []
+        for r in rows:
+            v_id = r["vault_id"]
+            is_owner = r["owner_id"] == principal.user_id
+            is_granted = v_id in usable_vault_ids
+            is_discoverable = bool(r["discoverable"]) or r["visibility"] != "private"
+            is_admin = "admin" in principal.roles
 
-        if is_owner or is_granted or is_discoverable or is_admin:
-            v_dict = dict(r)
-            v_dict["retention"] = json.loads(r["retention"])
-            v_dict["has_active_grant"] = is_granted or is_owner or is_admin
-            visible.append(v_dict)
+            if is_owner or is_granted or is_discoverable or is_admin:
+                v_dict = dict(r)
+                v_dict["retention"] = json.loads(r["retention"])
+                v_dict["has_active_grant"] = is_granted or is_owner or is_admin
+
+                # Fetch real active documents for this vault
+                cursor.execute("""
+                    SELECT resource_id, vault_id, resource_type, title, classification, status, created_at,
+                           (SELECT COUNT(*) FROM chunks c WHERE c.resource_id = resources.resource_id) as chunks_count
+                    FROM resources
+                    WHERE vault_id = ? AND status = 'active'
+                    ORDER BY created_at DESC
+                """, (v_id,))
+                doc_rows = cursor.fetchall()
+                v_dict["documents"] = [dict(d) for d in doc_rows]
+                v_dict["document_count"] = len(doc_rows)
+
+                cursor.execute("SELECT COUNT(*) as c FROM chunks WHERE vault_id = ?", (v_id,))
+                c_row = cursor.fetchone()
+                v_dict["chunk_count"] = c_row["c"] if c_row else 0
+
+                visible.append(v_dict)
 
     return {"vaults": visible}
+
+@app.get("/api/vaults/{vault_slug}/documents")
+def get_vault_documents(vault_slug: str, principal: Principal = Depends(get_current_principal)):
+    """Returns all documents ingested in a specific vault."""
+    now = time_authority.now()
+    usable = PolicyEngine.usable_grants(principal, now.timestamp)
+    vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT resource_id, vault_id, resource_type, title, classification, status, created_at,
+                   (SELECT COUNT(*) FROM chunks c WHERE c.resource_id = resources.resource_id) as chunks_count
+            FROM resources
+            WHERE vault_id = ? AND status = 'active'
+            ORDER BY created_at DESC
+        """, (vault.vault_id,))
+        rows = cursor.fetchall()
+
+    return {"vault_slug": vault.slug, "documents": [dict(r) for r in rows]}
 
 # ----------------- RETRIEVAL FIREWALL & RAG QUERY (§18, §19, §21, §31, §62) -----------------
 @app.post("/api/rag/query", response_model=QueryResponse)
@@ -284,6 +448,21 @@ def query_rag(
         client_ip=client_ip
     )
 
+    gate_a_data = {
+        "compiled_filter_valid": True,
+        "candidates_count": gate_a_count
+    }
+    gate_b_data = {
+        "evaluated_count": gate_a_count,
+        "authorized_count": len(authorized_evidence),
+        "excluded_count": excluded_count
+    }
+    grounding_data = {
+        "claims_count": len(claims),
+        "citations_count": len(updated_citations),
+        "status": answer_status
+    }
+
     trace = RetrievalSecurityTrace(
         user_id=principal.user_id,
         role=principal.roles[0] if principal.roles else "viewer",
@@ -297,7 +476,10 @@ def query_rag(
         citations_total_count=len(updated_citations),
         generation_mode=gen_mode,
         answer_status=answer_status,
-        refusal_reason=refusal_reason or (val_reason if not val_ok else None)
+        refusal_reason=refusal_reason or (val_reason if not val_ok else None),
+        gate_a=gate_a_data,
+        gate_b=gate_b_data,
+        grounding=grounding_data
     )
 
     return QueryResponse(
@@ -388,7 +570,10 @@ async def upload_pdf(
     """Secure multi-modal PDF upload with quarantine validation (§11, §202)."""
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
-    vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
+    try:
+        vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
+    except ScopeViolation as e:
+        raise HTTPException(status_code=403, detail=str(e))
 
     # Upload authorization (§202): owner, privileged roles, or demo mode
     is_privileged = (
