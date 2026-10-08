@@ -1,0 +1,67 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Sensitive data, encryption keys & local databases
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite3
+data/*.pem
+data/*.key
+data/*.hex
+data/.*
+data/*.json
+data/*.log
+data/qdrant_db/
+data/qdrant_storage/
+storage/encrypted/*.enc
+storage/quarantine/*
+
+# Keep directory structure
+!data/.gitkeep
+!storage/encrypted/.gitkeep
+!storage/quarantine/.gitkeep
+
+# Environment variables & secrets
+.env
+.env.local
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs & temp files
+*.log
+scratch/
+frontend/node_modules/

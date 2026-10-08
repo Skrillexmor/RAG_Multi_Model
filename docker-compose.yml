@@ -1,0 +1,58 @@
+version: "3.8"
+
+networks:
+  frontend-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
+    internal: true
+  storage-net:
+    driver: bridge
+    internal: true
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-rag-gateway
+    networks:
+      - frontend-net
+      - backend-net
+    ports:
+      - "8000:8000"
+    environment:
+      - API_PORT=8000
+      - API_HOST=0.0.0.0
+      - JWT_SECRET=lan-super-secret-production-signing-key-minimum-32-chars
+      - LEASE_TTL_SECONDS=300
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+    restart: unless-stopped
+
+  # Local vector engine
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: secure-rag-qdrant
+    networks:
+      - storage-net
+    environment:
+      - QDRANT__SERVICE__API_KEY=local_secure_qdrant_key
+    volumes:
+      - ./data/qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  # Local canonical relational database with RLS
+  postgres:
+    image: postgres:16-alpine
+    container_name: secure-rag-postgres
+    networks:
+      - storage-net
+    environment:
+      - POSTGRES_USER=rag_admin
+      - POSTGRES_PASSWORD=local_secure_pg_password
+      - POSTGRES_DB=secure_rag
+    volumes:
+      - ./data/pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
