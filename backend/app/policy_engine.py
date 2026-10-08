@@ -47,11 +47,11 @@ class PolicyEngine:
               AND ra.valid_from <= ?
               AND (ra.valid_until IS NULL OR ra.valid_until > ?)
             """, (user_id, now_iso, now_iso))
-            roles = [r["name"] for r in cursor.fetchall()]
+            roles = list(dict.fromkeys(r["name"] for r in cursor.fetchall()))
 
             # Load groups
             cursor.execute("SELECT group_name FROM user_groups WHERE user_id = ?", (user_id,))
-            groups = [g["group_name"] for g in cursor.fetchall()]
+            groups = list(dict.fromkeys(g["group_name"] for g in cursor.fetchall()))
 
             return Principal(
                 user_id=user_id,

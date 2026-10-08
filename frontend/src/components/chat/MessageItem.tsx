@@ -8,6 +8,11 @@ import {
   ExternalLink,
   ChevronRight,
   Info,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Music as AudioIcon,
+  Code as CodeIcon,
+  Play,
 } from "lucide-react"
 import { Message, CitationRef, EvidenceItem } from "../../types"
 import { useApp } from "../../context/AppContext"
@@ -231,17 +236,55 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                 const ev = message.evidenceItems?.find(
                   (e) => e.evidence_id === cit.evidence_id
                 )
+                const prov = ev?.provenance || {}
+                const modality = cit.modality || prov.modality || "document"
+                const mediaUrl = cit.media_url || prov.media_url
+                const keyframeUrl = cit.keyframe_url || prov.keyframe_url
+                const timestamp = cit.timestamp || prov.timestamp
+
+                const isImage = modality === "image"
+                const isVideo = modality === "video"
+                const isAudio = modality === "audio"
+                const isCode = modality === "code"
+
                 return (
                   <button
                     key={idx}
                     onClick={() => {
                       if (ev) openEvidenceInspector(ev)
                     }}
-                    className="text-left p-2.5 rounded-lg border border-border/70 bg-surface-subtle/50 hover:bg-surface-subtle hover:border-border transition-all group flex items-start justify-between"
+                    className="text-left p-2.5 rounded-xl border border-border/70 bg-surface-subtle/50 hover:bg-surface-subtle hover:border-emerald-500/40 transition-all group flex items-start justify-between gap-2.5"
                   >
-                    <div className="min-w-0 flex-1 pr-2">
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground group-hover:text-primary transition-colors">
-                        <FileText className="h-3 w-3 text-muted-foreground shrink-0" />
+                    {/* Multimodal Preview Thumbnail / Icon */}
+                    {isImage && mediaUrl ? (
+                      <div className="h-12 w-12 rounded-lg overflow-hidden border border-border shrink-0 bg-black/40">
+                        <img src={mediaUrl} alt="Evidence thumbnail" className="h-full w-full object-cover" />
+                      </div>
+                    ) : isVideo && keyframeUrl ? (
+                      <div className="relative h-12 w-16 rounded-lg overflow-hidden border border-border shrink-0 bg-black/40">
+                        <img src={keyframeUrl} alt="Video keyframe" className="h-full w-full object-cover" />
+                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                          <Play className="h-3.5 w-3.5 text-white fill-white/80" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border mt-0.5 ${
+                        isImage ? "bg-indigo-500/10 border-indigo-500/25 text-indigo-400" :
+                        isVideo ? "bg-amber-500/10 border-amber-500/25 text-amber-400" :
+                        isAudio ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400" :
+                        isCode ? "bg-sky-500/10 border-sky-500/25 text-sky-400" :
+                        "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                      }`}>
+                        {isImage ? <ImageIcon className="h-4 w-4" /> :
+                         isVideo ? <VideoIcon className="h-4 w-4" /> :
+                         isAudio ? <AudioIcon className="h-4 w-4" /> :
+                         isCode ? <CodeIcon className="h-4 w-4" /> :
+                         <FileText className="h-4 w-4" />}
+                      </div>
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground group-hover:text-emerald-400 transition-colors">
                         <span className="truncate">{cit.vault_name || "Document"}</span>
                         <Badge
                           variant="clearance"
@@ -249,12 +292,18 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                         >
                           {cit.locator || `[${cit.citation_id}]`}
                         </Badge>
+                        {timestamp && (
+                          <span className="text-[9px] font-mono px-1 py-0.2 rounded border border-amber-500/30 text-amber-300 bg-amber-500/5">
+                            {timestamp}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-[11px] text-muted-foreground mt-1 line-clamp-1 italic">
+                      <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2 italic">
                         "{cit.quote}"
                       </p>
                     </div>
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground shrink-0 mt-0.5" />
+
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground shrink-0 mt-1" />
                   </button>
                 )
               })}

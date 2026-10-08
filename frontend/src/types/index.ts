@@ -89,6 +89,10 @@ export interface CitationRef {
   vault_name: string
   locator: string
   quote: string
+  modality?: string
+  media_url?: string
+  keyframe_url?: string
+  timestamp?: string
 }
 
 export interface ClaimItem {
@@ -126,6 +130,12 @@ export interface EvidenceItem {
     page?: number
     locator?: string
     bbox?: any
+    modality?: string
+    media_url?: string
+    keyframe_url?: string
+    timestamp?: string
+    line_start?: number
+    line_end?: number
   }
   score: number
   proof: AuthorizationProofObject

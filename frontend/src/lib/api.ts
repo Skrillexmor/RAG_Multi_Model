@@ -279,7 +279,7 @@ class ApiClient {
     })
   }
 
-  async uploadPdf(vaultSlug: string, file: File, classification = 1, minClearance = 1, allowedRoles?: string[]): Promise<any> {
+  async uploadFile(vaultSlug: string, file: File, classification = 1, minClearance = 1, allowedRoles?: string[]): Promise<any> {
     const formData = new FormData()
     formData.append("file", file)
     formData.append("classification", classification.toString())
@@ -288,17 +288,30 @@ class ApiClient {
       formData.append("allowed_roles", JSON.stringify(allowedRoles))
     }
 
-    return this.request(`/api/vaults/${vaultSlug}/upload-pdf`, {
+    return this.request(`/api/vaults/${vaultSlug}/upload`, {
       method: "POST",
       body: formData,
     })
   }
 
+  async uploadPdf(vaultSlug: string, file: File, classification = 1, minClearance = 1, allowedRoles?: string[]): Promise<any> {
+    return this.uploadFile(vaultSlug, file, classification, minClearance, allowedRoles)
+  }
+
   // --- RAG Query ---
-  async queryRag(vaultSlug: string, query: string, purpose = "general_query", resourceId?: string): Promise<RagQueryResponse> {
+  async queryRag(
+    vaultSlug: string,
+    query: string,
+    purpose = "general_query",
+    resourceId?: string,
+    history?: Array<{ role: string; content: string }>
+  ): Promise<RagQueryResponse> {
     const payload: Record<string, any> = { query, purpose }
     if (resourceId) {
       payload.resource_id = resourceId
+    }
+    if (history && history.length > 0) {
+      payload.history = history
     }
 
     const res = await this.request<any>(`/api/rag/${vaultSlug}/query`, {

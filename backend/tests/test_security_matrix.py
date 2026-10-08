@@ -15,7 +15,7 @@ from backend.app.config import JWT_SECRET, JWT_ALGORITHM, ENCRYPTED_DIR
 from backend.app.crypto import (
     verify_password, hash_password, sign_grant_payload, verify_grant_signature,
     derive_vault_kek, encrypt_blob, decrypt_blob, compute_content_hash,
-    verify_signature, get_system_public_key_bytes
+    verify_signature, get_system_public_key_bytes, compute_audit_hash
 )
 from backend.app.models import (
     Principal, Vault, Grant, Chunk, ResourceManifest, AuthorizationProofObject,
@@ -44,8 +44,224 @@ class TestSecurityMatrix:
 
     results: List[Dict[str, Any]] = []
 
+    def ensure_fixtures(self):
+        now = time_authority.now().timestamp
+        now_iso = now.isoformat()
+        two_days_later = (now + timedelta(days=2)).isoformat()
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            # 1. Roles
+            roles = [
+                ("r_admin", "admin", "System and Security Administrator"),
+                ("r_analyst", "analyst", "Finance / Data Analyst"),
+                ("r_hr", "hr", "Human Resources Specialist"),
+                ("r_engineer", "engineer", "Core Engineering Team"),
+                ("r_viewer", "viewer", "Standard Organization Viewer"),
+                ("r_auditor", "auditor", "Independent Compliance Auditor"),
+                ("r_guest", "guest", "Untrusted External Contractor")
+            ]
+            for rid, name, desc in roles:
+                cursor.execute("INSERT OR IGNORE INTO roles (role_id, name, description) VALUES (?, ?, ?)", (rid, name, desc))
+
+            # 2. Users
+            users = [
+                ("u_alice", "tenant_primary", "alice", hash_password("alice123"), "Finance", 2),
+                ("u_bob", "tenant_primary", "bob", hash_password("bob123"), "Human Resources", 2),
+                ("u_charlie", "tenant_primary", "charlie", hash_password("charlie123"), "Engineering", 2),
+                ("u_diana", "tenant_primary", "diana", hash_password("diana123"), "Security", 3),
+                ("u_eve", "tenant_primary", "eve", hash_password("eve123"), "Audit", 2),
+            ]
+            for uid, tid, uname, pwhash, dept, clr in users:
+                cursor.execute("""
+                INSERT OR IGNORE INTO users (user_id, tenant_id, username, password_hash, department, clearance, is_active, auth_epoch, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?)
+                """, (uid, tid, uname, pwhash, dept, clr, now_iso))
+
+            # 3. Role assignments
+            assignments = [
+                ("u_alice", "r_analyst"),
+                ("u_alice", "r_viewer"),
+                ("u_bob", "r_hr"),
+                ("u_bob", "r_viewer"),
+                ("u_charlie", "r_engineer"),
+                ("u_charlie", "r_viewer"),
+                ("u_diana", "r_admin"),
+                ("u_diana", "r_viewer"),
+                ("u_eve", "r_auditor"),
+                ("u_eve", "r_viewer"),
+            ]
+            for uid, rid in assignments:
+                cursor.execute("""
+                INSERT OR IGNORE INTO role_assignments (user_id, role_id, valid_from, valid_until, granted_by)
+                VALUES (?, ?, ?, ?, 'system')
+                """, (uid, rid, now_iso, two_days_later))
+
+            # 4. User groups
+            groups = [
+                ("u_alice", "group:finance"),
+                ("u_bob", "group:hr"),
+                ("u_charlie", "group:engineering"),
+                ("u_diana", "group:security"),
+                ("u_eve", "group:compliance"),
+            ]
+            for uid, grp in groups:
+                cursor.execute("INSERT OR IGNORE INTO user_groups (user_id, group_name) VALUES (?, ?)", (uid, grp))
+
+            # 5. Vaults
+            vaults_data = [
+                ("v_alpha", "project-alpha", "Project Alpha Knowledge Base", "u_alice", "r_analyst", 4, "private", 1),
+                ("v_fin", "finance-q3", "Finance Q3 Executive Vault", "u_alice", "r_analyst", 2, "private", 1),
+                ("v_hr", "hr-personnel", "HR Restricted Personnel Vault", "u_bob", "r_hr", 3, "private", 1),
+                ("v_eng", "core-architecture", "Core Engineering Specs", "u_charlie", "r_engineer", 2, "private", 1),
+            ]
+            for vid, slug, name, owner, steward, ceil, vis, disc in vaults_data:
+                cursor.execute("""
+                INSERT OR IGNORE INTO vaults (
+                    vault_id, tenant_id, slug, display_name, owner_id, steward_role_id,
+                    classification_ceiling, status, scope_mode, visibility, discoverable,
+                    allow_delegation, max_delegation_depth, retention, key_id, origin, vault_epoch, created_at
+                ) VALUES (?, 'tenant_primary', ?, ?, ?, ?, ?, 'active', 'strict_single', ?, ?, 1, 3, '{}', 'vault_kek', 'native', 1, ?)
+                """, (vid, slug, name, owner, steward, ceil, vis, disc, now_iso))
+
+            # 6. Federation nodes
+            pubkey = base64.b64encode(get_system_public_key_bytes()).decode("utf-8")
+            cert_fp = hashlib.sha256(pubkey.encode()).hexdigest()[:16]
+            nodes = [
+                ("node_local_primary", "HQ Primary Vault Hub"),
+                ("node_remote_test", "Remote Satellite Node"),
+                ("node_different_server", "External Regional Node")
+            ]
+            for nid, name in nodes:
+                cursor.execute("""
+                INSERT OR IGNORE INTO federation_nodes (node_id, name, pubkey, cert_fp, state, enrolled_at)
+                VALUES (?, ?, ?, ?, 'active', ?)
+                """, (nid, name, pubkey, cert_fp, now_iso))
+
+            # 7. Usable grants
+            grants = [
+                {
+                    "grant_id": "g_alice_alpha",
+                    "vault_id": "v_alpha",
+                    "grantee_type": "user",
+                    "grantee_id": "user:u_alice",
+                    "selector": {"all": True},
+                    "actions": [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE],
+                    "valid_from": now_iso,
+                    "valid_until": two_days_later,
+                    "purpose": "project_analysis",
+                    "delegable": True,
+                    "depth": 0,
+                    "parent_grant_id": None,
+                    "issuer_id": "system"
+                },
+                {
+                    "grant_id": "g_bob_hr",
+                    "vault_id": "v_hr",
+                    "grantee_type": "user",
+                    "grantee_id": "user:u_bob",
+                    "selector": {"all": True},
+                    "actions": [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE],
+                    "valid_from": now_iso,
+                    "valid_until": two_days_later,
+                    "purpose": "hr_management",
+                    "delegable": False,
+                    "depth": 0,
+                    "parent_grant_id": None,
+                    "issuer_id": "system"
+                },
+                {
+                    "grant_id": "g_charlie_alpha_eng",
+                    "vault_id": "v_alpha",
+                    "grantee_type": "user",
+                    "grantee_id": "user:u_charlie",
+                    "selector": {"max_classification": 1, "exclude_tags": ["credentials", "finance", "hr"]},
+                    "actions": [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE],
+                    "valid_from": now_iso,
+                    "valid_until": two_days_later,
+                    "purpose": "project_analysis",
+                    "delegable": False,
+                    "depth": 1,
+                    "parent_grant_id": "g_alice_alpha",
+                    "issuer_id": "u_alice"
+                }
+            ]
+            for g in grants:
+                sig = sign_grant_payload(g)
+                cursor.execute("""
+                INSERT OR IGNORE INTO grants (
+                    grant_id, vault_id, grantee_type, grantee_id, selector, actions,
+                    valid_from, valid_until, purpose, delegable, depth, parent_grant_id,
+                    issuer_id, state, signature, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                """, (
+                    g["grant_id"], g["vault_id"], g["grantee_type"], g["grantee_id"],
+                    json.dumps(g["selector"]), json.dumps(g["actions"]),
+                    g["valid_from"], g["valid_until"], g["purpose"],
+                    1 if g["delegable"] else 0, g["depth"], g["parent_grant_id"],
+                    g["issuer_id"], sig, now_iso
+                ))
+                cursor.execute("INSERT OR IGNORE INTO grant_usage (grant_id, queries, evidence, bytes) VALUES (?, 0, 0, 0)", (g["grant_id"],))
+
+            conn.commit()
+
+        # Audit chain check and repair
+        valid, _, _ = audit_service.verify_chain()
+        if not valid:
+            with db.get_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT * FROM audit_events ORDER BY event_id ASC")
+                ev_rows = c.fetchall()
+                prev = "GENESIS_AUDIT_HASH_SECURE_RAG_2026"
+                for r in ev_rows:
+                    eid = r["event_id"]
+                    event_dict = {
+                        "request_id": r["request_id"],
+                        "actor_id": r["actor_id"],
+                        "session_id": r["session_id"],
+                        "action": r["action"],
+                        "object_type": r["object_type"],
+                        "object_id": r["object_id"],
+                        "decision": r["decision"],
+                        "policy_version": r["policy_version"],
+                        "reason_code": r["reason_code"],
+                        "timestamp": r["timestamp"],
+                        "client_ip": r["client_ip"]
+                    }
+                    canonical_json = json.dumps(event_dict, sort_keys=True, separators=(",", ":"))
+                    h = compute_audit_hash(prev, canonical_json)
+                    c.execute("UPDATE audit_events SET prev_hash = ?, hash = ? WHERE event_id = ?", (prev, h, eid))
+                    prev = h
+                conn.commit()
+
+        # Structured CSV check
+        with db.get_connection() as conn:
+            cnt = conn.cursor().execute("SELECT COUNT(*) as c FROM structured_records WHERE table_name = 'employees'").fetchone()["c"]
+        if cnt < 5:
+            employees_csv = (
+                "employee_id,name,department,salary,bank_account\n"
+                "EMP001,Aarav Sharma,Engineering,3500000,HDFC-991288\n"
+                "EMP002,Priya Patel,HR,2400000,ICICI-441209\n"
+                "EMP003,Rohan Verma,Finance,4200000,SBI-772183\n"
+                "EMP004,Ananya Iyer,Engineering,3800000,AXIS-119284\n"
+                "EMP005,Vikram Singh,Finance,5100000,KOTAK-661920\n"
+            )
+            ingestion_pipeline.ingest_structured_csv(
+                vault_id="v_alpha",
+                table_name="employees",
+                csv_text=employees_csv,
+                owner_id="u_alice",
+                field_configs={
+                    "employee_id": {"classification": 1, "min_clearance": 1, "allowed_roles": ["role:viewer", "role:analyst", "role:engineer", "role:hr"]},
+                    "name": {"classification": 1, "min_clearance": 1, "allowed_roles": ["role:viewer", "role:analyst", "role:engineer", "role:hr"]},
+                    "department": {"classification": 1, "min_clearance": 1, "allowed_roles": ["role:viewer", "role:analyst", "role:engineer", "role:hr"]},
+                    "salary": {"classification": 2, "min_clearance": 2, "allowed_roles": ["role:hr", "role:admin"], "is_sensitive": True},
+                    "bank_account": {"classification": 4, "min_clearance": 3, "allowed_roles": ["role:admin"], "is_sensitive": True}
+                }
+            )
+
     def setup_method(self):
         self.results = []
+        self.ensure_fixtures()
 
     def log(self, test_id: str, title: str, category: str, passed: bool, details: str, raise_assert: bool = False):
         self.results.append({
@@ -60,6 +276,7 @@ class TestSecurityMatrix:
 
     def run_all(self) -> List[Dict[str, Any]]:
         self.results = []
+        self.ensure_fixtures()
         tests = [
             # Authentication Tests (AUTH-001..010)
             self.test_auth_001_wrong_password,

@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Depends, HTTPException, Header, status, Request, UploadFile, File, Form
@@ -7,6 +8,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import jwt
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 from .config import JWT_SECRET, JWT_ALGORITHM, DEMO_MODE, TEST_MODE
 from .models import (
@@ -50,6 +53,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+
+from fastapi.staticfiles import StaticFiles
+from .config import MEDIA_DIR
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 
 @app.on_event("startup")
 def on_startup():
@@ -736,15 +744,18 @@ def delete_document(resource_id: str, principal: Principal = Depends(get_current
 
 @app.get("/api/users")
 def list_system_users(principal: Principal = Depends(get_current_principal)):
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users")
+        if is_admin:
+            cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users")
+        else:
+            cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users WHERE user_id = ?", (principal.user_id,))
         user_rows = cursor.fetchall()
         
         users_list = []
         for u in user_rows:
             u_dict = dict(u)
-            # Fetch roles for this user
             cursor.execute("""
                 SELECT r.name 
                 FROM role_assignments ra
@@ -766,6 +777,8 @@ class CreateUserPayload(BaseModel):
 
 @app.post("/api/users")
 def create_system_user(body: CreateUserPayload, principal: Principal = Depends(get_current_principal)):
+    if not any(r in principal.roles for r in ("admin", "security_admin")):
+        raise HTTPException(status_code=403, detail="Unauthorized: user creation requires admin role.")
     clean_username = body.username.strip().lower()
     if not clean_username or len(clean_username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
@@ -817,6 +830,10 @@ class UpdateUserPayload(BaseModel):
 
 @app.put("/api/users/{user_id}")
 def update_system_user(user_id: str, body: UpdateUserPayload, principal: Principal = Depends(get_current_principal)):
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+    if not is_admin and user_id != principal.user_id:
+        raise HTTPException(status_code=403, detail="Unauthorized: non-admin users may only edit their own profile.")
+
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
@@ -826,17 +843,17 @@ def update_system_user(user_id: str, body: UpdateUserPayload, principal: Princip
 
         if body.department is not None:
             cursor.execute("UPDATE users SET department = ? WHERE user_id = ?", (body.department.strip(), user_id))
-        if body.clearance is not None:
+        if is_admin and body.clearance is not None:
             c_lvl = max(1, min(body.clearance, 4))
             cursor.execute("UPDATE users SET clearance = ? WHERE user_id = ?", (c_lvl, user_id))
-        if body.is_active is not None:
+        if is_admin and body.is_active is not None:
             cursor.execute("UPDATE users SET is_active = ? WHERE user_id = ?", (1 if body.is_active else 0, user_id))
         if body.new_password and len(body.new_password) >= 4:
             new_hash = hash_password(body.new_password)
             cursor.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", (new_hash, user_id))
 
-        # Update roles if provided
-        if body.roles is not None:
+        # Update roles if admin provided them
+        if is_admin and body.roles is not None:
             cursor.execute("DELETE FROM role_assignments WHERE user_id = ?", (user_id,))
             now_iso = time_authority.now().isoformat()
             for r_name in body.roles:
@@ -854,6 +871,8 @@ def update_system_user(user_id: str, body: UpdateUserPayload, principal: Princip
 
 @app.delete("/api/users/{user_id}")
 def delete_system_user(user_id: str, principal: Principal = Depends(get_current_principal)):
+    if not any(r in principal.roles for r in ("admin", "security_admin")):
+        raise HTTPException(status_code=403, detail="Unauthorized: user deletion requires admin role.")
     if user_id == principal.user_id:
         raise HTTPException(status_code=400, detail="Cannot delete your own active user account.")
 
@@ -873,6 +892,8 @@ def delete_system_user(user_id: str, principal: Principal = Depends(get_current_
 @app.post("/api/maintenance/clear-chunks")
 def clear_all_chunks(principal: Principal = Depends(get_current_principal)):
     """Maintenance endpoint: safely cleans/purges all chunks and resets vector store (§128)."""
+    if not any(r in principal.roles for r in ("admin", "security_admin")):
+        raise HTTPException(status_code=403, detail="Unauthorized: clearing chunks requires admin role.")
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT chunk_id FROM chunks")
@@ -883,11 +904,10 @@ def clear_all_chunks(principal: Principal = Depends(get_current_principal)):
         cursor.execute("DELETE FROM chunks")
         conn.commit()
 
-    if chunk_ids:
-        try:
-            vector_store.delete_points(chunk_ids)
-        except Exception as e:
-            logger.warning(f"Vector store deletion error: {e}")
+    try:
+        vector_store.clear_all()
+    except Exception as e:
+        logger.warning(f"Vector store reset error: {e}")
 
     return {"status": "CLEARED", "chunks_deleted": len(chunk_ids)}
 
@@ -945,8 +965,11 @@ def query_rag(
         resource_id=req.resource_id
     )
 
-    # 4. Gate A: Execute Vector Search
-    candidate_tuples = vector_store.search(req.query, compiled_filter, top_k=10)
+    # 4. Gate A: Contextual Query Expansion & Execute Vector Search
+    search_query = req.query
+    if req.history:
+        search_query = local_llm.contextualize_query(req.query, req.history)
+    candidate_tuples = vector_store.search(search_query, compiled_filter, top_k=10)
     gate_a_count = len(candidate_tuples)
 
     # 5. Gate B: Canonical Gate - Authoritative recheck & decryption from canonical store (§21)
@@ -963,7 +986,8 @@ def query_rag(
     answer_text, claims, citations, gen_mode, refusal_reason = local_llm.generate(
         query=req.query,
         vault=vault,
-        evidence=authorized_evidence
+        evidence=authorized_evidence,
+        history=req.history
     )
 
     # 7. Grounding & Citation Validation (§62, §63, §64)
@@ -1105,9 +1129,10 @@ def query_structured_data(req: StructuredQueryRequest, principal: Principal = De
     return {"table": req.table_name, "vault": vault.slug, "records_count": len(records), "records": records}
 
 # ----------------- INGESTION APIS (§10..§15, §202) -----------------
+@app.post("/api/vaults/{vault_slug}/upload")
 @app.post("/api/vaults/{vault_slug}/upload-pdf")
 @app.post("/api/datasets/{vault_slug}/upload-pdf")
-async def upload_pdf(
+async def upload_multimodal_file(
     vault_slug: str,
     file: UploadFile = File(...),
     classification: Optional[int] = Form(1),
@@ -1115,7 +1140,7 @@ async def upload_pdf(
     allowed_roles: Optional[str] = Form(None),
     principal: Principal = Depends(get_current_principal)
 ):
-    """Secure multi-modal PDF upload with quarantine validation (§11, §202)."""
+    """Secure multi-modal file upload (PDF, DOCX, Code, Images, Audio, Video) with quarantine validation (§11, §202)."""
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
     try:
@@ -1138,12 +1163,12 @@ async def upload_pdf(
         except Exception:
             roles_list = [r.strip() for r in allowed_roles.split(",") if r.strip()]
 
-    pdf_bytes = await file.read()
+    file_bytes = await file.read()
     try:
-        res_id = ingestion_pipeline.ingest_raw_pdf(
+        res_id = ingestion_pipeline.ingest_universal(
             vault_id=vault.vault_id,
-            filename=file.filename or "upload.pdf",
-            pdf_bytes=pdf_bytes,
+            filename=file.filename or "upload.bin",
+            file_bytes=file_bytes,
             classification=classification or 1,
             min_clearance=min_clearance or 1,
             allowed_roles=roles_list

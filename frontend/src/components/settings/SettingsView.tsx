@@ -50,6 +50,11 @@ export const SettingsView: React.FC = () => {
   const { persona, principal, refreshVaults } = useApp()
   const [theme, setThemeState] = useState<"dark" | "light" | "system">(storage.getTheme())
 
+  const isAdmin =
+    persona.roles.includes("admin") ||
+    persona.roles.includes("security_admin") ||
+    Boolean(principal?.roles && (principal.roles.includes("admin") || principal.roles.includes("security_admin")))
+
   // Users CRUD state
   const [users, setUsers] = useState<UserSummary[]>([])
   const [isLoadingUsers, setIsLoadingUsers] = useState(false)
@@ -238,165 +243,221 @@ export const SettingsView: React.FC = () => {
         </p>
       </div>
 
-      {/* Account & User Management Section */}
-      <div className="p-5 rounded-xl border border-border bg-surface-raised space-y-4 text-xs shadow-sm">
-        <div className="flex items-center justify-between">
+      {/* Conditionally Render Admin Panels vs Regular User Profile */}
+      {isAdmin ? (
+        <>
+          {/* Account & User Management Section */}
+          <div className="p-5 rounded-xl border border-border bg-surface-raised space-y-4 text-xs shadow-sm">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
+                  <Users className="h-4 w-4 text-emerald-400" />
+                  Account & Identity Management
+                </h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Administer local user accounts, RBAC tokens, and security clearance ceilings.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={loadUsers}
+                  disabled={isLoadingUsers}
+                  className="h-8 text-xs gap-1.5"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isLoadingUsers ? "animate-spin" : ""}`} />
+                  <span>Refresh</span>
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setIsCreateModalOpen(true)}
+                  className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <UserPlus className="h-3.5 w-3.5" />
+                  <span>Add Account</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Users Table */}
+            <div className="border border-border rounded-lg overflow-hidden bg-surface-subtle">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-surface/60 text-[11px] text-muted-foreground font-semibold">
+                      <th className="py-2.5 px-3">Username</th>
+                      <th className="py-2.5 px-3">Clearance</th>
+                      <th className="py-2.5 px-3">Assigned Roles</th>
+                      <th className="py-2.5 px-3">Department</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {users.map((u) => {
+                      const isCurrent = principal?.user_id === u.user_id || persona.username === u.username
+                      return (
+                        <tr key={u.user_id} className="hover:bg-surface-raised/60 transition-colors">
+                          <td className="py-2.5 px-3 font-mono font-medium text-foreground">
+                            <div className="flex items-center gap-1.5">
+                              <span>{u.username}</span>
+                              {isCurrent && (
+                                <Badge variant="success" className="text-[9px] px-1 py-0 font-normal">
+                                  Current
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {getClearanceBadge(u.clearance_level)}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {u.roles.map((r) => (
+                                <span
+                                  key={r}
+                                  className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono text-muted-foreground"
+                                >
+                                  {r}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-muted-foreground font-mono text-[11px]">
+                            {u.department || "General"}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {u.is_active ? (
+                              <span className="flex items-center gap-1 text-emerald-400 text-[11px]">
+                                <CheckCircle2 className="h-3 w-3" /> Active
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-rose-400 text-[11px]">
+                                <XCircle className="h-3 w-3" /> Disabled
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => handleOpenEdit(u)}
+                                className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                                title="Edit user roles and clearance"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </button>
+                              {!isCurrent && (
+                                <button
+                                onClick={() => setDeletingUser(u)}
+                                className="p-1 rounded hover:bg-rose-500/20 text-muted-foreground hover:text-rose-400 transition-colors"
+                                title="Delete user account"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Vector Storage & Chunks Maintenance Section */}
+        <div className="p-5 rounded-xl border border-border bg-surface-raised space-y-4 text-xs shadow-sm">
           <div>
             <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
-              <Users className="h-4 w-4 text-emerald-400" />
-              Account & Identity Management
+              <Database className="h-4 w-4 text-emerald-400" />
+              System Maintenance & Vector Storage
             </h3>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              Administer local user accounts, RBAC tokens, and security clearance ceilings.
+              Perform administrative maintenance on Qdrant local vector embeddings and SQLite chunk records.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="p-4 rounded-lg border border-border/80 bg-surface-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground text-xs">Purge Chunks & Reset Vector Index</span>
+                <Badge variant="outline" className="border-amber-500/30 text-amber-300 text-[9px]">
+                  Maintenance Action
+                </Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground max-w-xl leading-relaxed">
+                Deletes all chunk embeddings from the local Qdrant collection and clears the chunks table.
+                Uploaded PDF manifests remain safe. You can re-index anytime by re-uploading documents.
+              </p>
+            </div>
+
             <Button
               variant="outline"
               size="sm"
-              onClick={loadUsers}
-              disabled={isLoadingUsers}
-              className="h-8 text-xs gap-1.5"
+              onClick={() => setIsClearChunksOpen(true)}
+              className="h-8 text-xs shrink-0 border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 gap-1.5"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isLoadingUsers ? "animate-spin" : ""}`} />
-              <span>Refresh</span>
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Clear Chunks & Vectors</span>
             </Button>
+          </div>
+        </div>
+      </>
+    ) : (
+      /* Regular Non-Admin User Card */
+      <div className="p-5 rounded-xl border border-border bg-surface-raised space-y-4 text-xs shadow-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="h-9 w-9 rounded-lg bg-surface-subtle border border-border flex items-center justify-center text-emerald-400">
+              <Users className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground text-sm">Personal Identity & Credentials</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Your authenticated workspace session and security clearance parameters.
+              </p>
+            </div>
+          </div>
+
+          {users.length > 0 && (
             <Button
               size="sm"
-              onClick={() => setIsCreateModalOpen(true)}
-              className="h-8 text-xs gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90"
+              variant="outline"
+              onClick={() => {
+                const me = users.find((u) => u.username === persona.username || u.user_id === principal?.user_id) || users[0]
+                handleOpenEdit(me)
+              }}
+              className="h-8 text-xs gap-1.5 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
             >
-              <UserPlus className="h-3.5 w-3.5" />
-              <span>Add Account</span>
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>Update My Password</span>
             </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div className="p-3 rounded-lg border border-border bg-surface-subtle space-y-1">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">User Principal</span>
+            <div className="font-mono text-sm font-semibold text-foreground">{persona.name} ({persona.username})</div>
+            <div className="text-[11px] text-muted-foreground">Assigned Roles: {persona.roles.join(", ")}</div>
+          </div>
+
+          <div className="p-3 rounded-lg border border-border bg-surface-subtle space-y-1">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Clearance Ceiling</span>
+            <div>{getClearanceBadge(persona.clearanceLevel)}</div>
+            <div className="text-[11px] text-muted-foreground">Department: {persona.roleTitle || "General"}</div>
           </div>
         </div>
 
-        {/* Users Table */}
-        <div className="border border-border rounded-lg overflow-hidden bg-surface-subtle">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-border bg-surface/60 text-[11px] text-muted-foreground font-semibold">
-                  <th className="py-2.5 px-3">Username</th>
-                  <th className="py-2.5 px-3">Clearance</th>
-                  <th className="py-2.5 px-3">Assigned Roles</th>
-                  <th className="py-2.5 px-3">Department</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {users.map((u) => {
-                  const isCurrent = principal?.user_id === u.user_id || persona.username === u.username
-                  return (
-                    <tr key={u.user_id} className="hover:bg-surface-raised/60 transition-colors">
-                      <td className="py-2.5 px-3 font-mono font-medium text-foreground">
-                        <div className="flex items-center gap-1.5">
-                          <span>{u.username}</span>
-                          {isCurrent && (
-                            <Badge variant="success" className="text-[9px] px-1 py-0 font-normal">
-                              Current
-                            </Badge>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {getClearanceBadge(u.clearance_level)}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {u.roles.map((r) => (
-                            <span
-                              key={r}
-                              className="px-1.5 py-0.5 rounded bg-surface border border-border text-[10px] font-mono text-muted-foreground"
-                            >
-                              {r}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-3 text-muted-foreground font-mono text-[11px]">
-                        {u.department || "General"}
-                      </td>
-                      <td className="py-2.5 px-3">
-                        {u.is_active ? (
-                          <span className="flex items-center gap-1 text-emerald-400 text-[11px]">
-                            <CheckCircle2 className="h-3 w-3" /> Active
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-rose-400 text-[11px]">
-                            <XCircle className="h-3 w-3" /> Disabled
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => handleOpenEdit(u)}
-                            className="p-1 rounded hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-                            title="Edit user roles and clearance"
-                          >
-                            <Edit2 className="h-3.5 w-3.5" />
-                          </button>
-                          {!isCurrent && (
-                            <button
-                              onClick={() => setDeletingUser(u)}
-                              className="p-1 rounded hover:bg-rose-500/20 text-muted-foreground hover:text-rose-400 transition-colors"
-                              title="Delete user account"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+        <div className="p-3 rounded-lg bg-surface-subtle/50 border border-border/40 text-[11px] text-muted-foreground flex items-center gap-2">
+          <Lock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span>Administrative management (User CRUD, Vector Purging) requires Security Officer or Admin role.</span>
         </div>
       </div>
-
-      {/* Vector Storage & Chunks Maintenance Section */}
-      <div className="p-5 rounded-xl border border-border bg-surface-raised space-y-4 text-xs shadow-sm">
-        <div>
-          <h3 className="font-semibold text-foreground text-sm flex items-center gap-2">
-            <Database className="h-4 w-4 text-emerald-400" />
-            System Maintenance & Vector Storage
-          </h3>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            Perform administrative maintenance on Qdrant local vector embeddings and SQLite chunk records.
-          </p>
-        </div>
-
-        <div className="p-4 rounded-lg border border-border/80 bg-surface-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-foreground text-xs">Purge Chunks & Reset Vector Index</span>
-              <Badge variant="outline" className="border-amber-500/30 text-amber-300 text-[9px]">
-                Maintenance Action
-              </Badge>
-            </div>
-            <p className="text-[11px] text-muted-foreground max-w-xl leading-relaxed">
-              Deletes all chunk embeddings from the local Qdrant collection and clears the chunks table.
-              Uploaded PDF manifests remain safe. You can re-index anytime by re-uploading documents.
-            </p>
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsClearChunksOpen(true)}
-            className="h-8 text-xs shrink-0 border-rose-500/30 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 gap-1.5"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span>Clear Chunks & Vectors</span>
-          </Button>
-        </div>
-      </div>
+    )}
 
       {/* Appearance Section */}
       <div className="p-4 rounded-xl border border-border bg-surface-raised space-y-3.5 text-xs shadow-sm">

@@ -92,6 +92,28 @@ class RealNeuralVectorStore:
         )
         self.qdrant.delete(collection_name=self.collection_name, points_selector=delete_filter)
 
+    def delete_points(self, chunk_ids: List[str]):
+        """Deletes points by chunk IDs."""
+        if not chunk_ids:
+            return
+        from qdrant_client.models import PointIdsList
+        point_ids = [self.get_deterministic_point_id(cid) for cid in chunk_ids]
+        try:
+            self.qdrant.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(points=point_ids)
+            )
+        except Exception as e:
+            logger.warning(f"Failed to delete points from Qdrant: {e}")
+
+    def clear_all(self):
+        """Recreates/resets the secure_chunks collection (§128)."""
+        try:
+            self.qdrant.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self._init_collection()
+
     def sync_all_from_database(self):
         """Syncs all database chunks into Qdrant."""
         self._init_collection()

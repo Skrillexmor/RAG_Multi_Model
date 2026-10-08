@@ -89,12 +89,21 @@ export const ChatView: React.FC<ChatViewProps> = ({ onRequestAccess }) => {
     saveConversation(conv)
     setIsLoading(true)
 
+    // Format history from previous messages in this conversation (last 6 turns)
+    const historyPayload = (activeConversation?.messages || [])
+      .slice(-6)
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+
     try {
       const res = await api.queryRag(
         selectedVault.slug,
         text,
         purpose,
-        effectiveFileId
+        effectiveFileId,
+        historyPayload
       )
 
       const assistantMessage: Message = {

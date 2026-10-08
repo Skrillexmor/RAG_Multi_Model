@@ -12,6 +12,8 @@ QUARANTINE_DIR = STORAGE_DIR / "quarantine"
 QUARANTINE_DIR.mkdir(parents=True, exist_ok=True)
 ENCRYPTED_DIR = STORAGE_DIR / "encrypted"
 ENCRYPTED_DIR.mkdir(parents=True, exist_ok=True)
+MEDIA_DIR = STORAGE_DIR / "media"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = DATA_DIR / "secure_rag.db"
 QDRANT_STORAGE_DIR = DATA_DIR / "qdrant_storage"

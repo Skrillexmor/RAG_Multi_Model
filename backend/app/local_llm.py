@@ -119,11 +119,73 @@ class LocalLLM:
         ]
         return any(re.search(pat, text) for pat in leak_patterns)
 
+    def contextualize_query(self, query: str, history: Optional[List[Dict[str, Any]]] = None) -> str:
+        """
+        Contextual Query Reformulation:
+        If there is conversation history and the current query is anaphoric, elliptical,
+        or a short follow-up (e.g., 'give me in detail', 'explain more', 'why?'),
+        reformulates it into a standalone search query for Gate A vector retrieval.
+        """
+        if not history:
+            return query
+
+        recent_turns = [m for m in history if m.get("content")]
+        if not recent_turns:
+            return query
+
+        last_msgs = recent_turns[-4:]
+        pronouns_or_short = {"detail", "more", "why", "how", "what", "that", "this", "it", "them", "these", "example", "syntax", "compare"}
+        query_words = set(query.lower().split())
+        is_follow_up = len(query.split()) < 8 or bool(query_words.intersection(pronouns_or_short))
+
+        if not is_follow_up:
+            return query
+
+        conv_text = []
+        for m in last_msgs:
+            role = m.get("role", "user").capitalize()
+            content = m.get("content", "").strip()
+            if role == "Assistant" and len(content) > 180:
+                content = content[:180] + "..."
+            conv_text.append(f"{role}: {content}")
+
+        history_str = "\n".join(conv_text)
+        rewrite_sys = (
+            "Given the chat history and follow-up question, rewrite the follow-up question "
+            "into a concise, self-contained search query. "
+            "Do NOT answer the question. Output ONLY the standalone search query phrase."
+        )
+        rewrite_user = f"Chat History:\n{history_str}\n\nFollow-up question: {query}\n\nStandalone search query:"
+
+        try:
+            req_data = json.dumps({
+                "model": LLM_MODEL,
+                "prompt": rewrite_user,
+                "system": rewrite_sys,
+                "stream": False,
+                "options": {"temperature": 0.1, "num_predict": 30}
+            }).encode("utf-8")
+            req = urllib.request.Request(self.ollama_url, data=req_data, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                standalone = data.get("response", "").strip().strip('"\'')
+                if standalone and len(standalone) > 3 and not standalone.lower().startswith("chat history"):
+                    return standalone
+        except Exception:
+            pass
+
+        last_user = next((m.get("content", "") for m in reversed(last_msgs) if m.get("role") == "user"), "")
+        if last_user and last_user != query:
+            return f"{last_user} {query}"
+
+        return query
+
     def generate(
         self,
         query: str,
         vault: Vault,
-        evidence: List[EvidenceItem]
+        evidence: List[EvidenceItem],
+        history: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[str, List[Claim], List[Citation], str, Optional[str]]:
         """
         Generates grounded, citation-backed response strictly from authorized evidence.
@@ -164,7 +226,6 @@ class LocalLLM:
                 return default_greeting, [], [], "LLM_GROUNDED", None
 
         # 4. Construct Untrusted Evidence Envelope (§61, §210)
-        # Filter out trivial chunks (like single numbers or isolated punctuation)
         filtered_evidence = [e for e in evidence if len(e.content.strip()) >= 10]
         if not filtered_evidence:
             filtered_evidence = evidence
@@ -178,25 +239,45 @@ class LocalLLM:
             exact_content = item.content.strip()
 
             evidence_lines.append(f"[ID: {c_id}] (Locator: {locator})\n{exact_content}\n")
+            prov = item.provenance or {}
             canonical_citation_lookup[c_id] = Citation(
                 citation_id=c_id,
                 evidence_id=item.evidence_id,
                 vault_name=vault.display_name,
                 locator=locator,
                 quote=exact_content,
-                verified=False
+                verified=False,
+                modality=prov.get("modality", "document"),
+                media_url=prov.get("media_url"),
+                keyframe_url=prov.get("keyframe_url"),
+                timestamp=prov.get("timestamp"),
             )
 
         evidence_envelope = "\n".join(evidence_lines)
+
+        # Build conversation history block
+        history_block = ""
+        if history:
+            clean_history = [m for m in history[-4:] if m.get("content")]
+            if clean_history:
+                h_lines = []
+                for m in clean_history:
+                    role_label = "User" if m.get("role") == "user" else "Assistant"
+                    h_text = m.get("content", "").strip()
+                    if len(h_text) > 250:
+                        h_text = h_text[:250] + "..."
+                    h_lines.append(f"{role_label}: {h_text}")
+                history_block = f"<RECENT_CONVERSATION_HISTORY>\n" + "\n".join(h_lines) + "\n</RECENT_CONVERSATION_HISTORY>\n\n"
 
         system_prompt = (
             f"You are the PrivateRAG Secure Intelligence Assistant for workspace '{vault.display_name}'.\n"
             "INSTRUCTIONS:\n"
             "1. Answer ONLY what the user asks directly, concisely, and factually based on the authorized evidence.\n"
-            "2. Do NOT include generic conversational filler, unsolicited disclaimers, or lengthy preamble.\n"
-            "3. Format your response cleanly using concise bullet points, bold key terms, and clear markdown.\n"
-            "4. Cite sources directly using markers like [C1], [C2].\n"
-            "5. Return your answer as a JSON object with keys:\n"
+            "2. If the user asks a follow-up question (e.g., 'give me in detail', 'explain more'), maintain conversational continuity with the previous turns.\n"
+            "3. Do NOT include generic conversational filler, unsolicited disclaimers, or lengthy preamble.\n"
+            "4. Format your response cleanly using concise bullet points, bold key terms, and clear markdown.\n"
+            "5. Cite sources directly using markers like [C1], [C2].\n"
+            "6. Return your answer as a JSON object with keys:\n"
             "  \"answer\": \"your concise, direct markdown answer\",\n"
             "  \"claims\": [ {\"text\": \"factual sentence\", \"citation_ids\": [\"C1\"]} ],\n"
             "  \"citations\": [ {\"citation_id\": \"C1\", \"locator\": \"Page X\"} ]\n"
@@ -204,7 +285,8 @@ class LocalLLM:
         )
 
         user_prompt = (
-            f"USER QUERY: {query}\n\n"
+            f"{history_block}"
+            f"CURRENT USER QUERY: {query}\n\n"
             f"<UNTRUSTED_EVIDENCE_DATA>\n{evidence_envelope}\n</UNTRUSTED_EVIDENCE_DATA>\n"
         )
 

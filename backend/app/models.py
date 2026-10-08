@@ -53,8 +53,17 @@ class Principal(BaseModel):
     groups: List[str] = Field(default_factory=list)
     department: str = "General"
     clearance: int = 1  # 0 to 4
+    clearance_level: Optional[int] = None
     is_active: bool = True
     auth_epoch: int = 1
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.clearance_level is None:
+            self.clearance_level = self.clearance
+        if self.roles:
+            self.roles = list(dict.fromkeys(self.roles))
+        if self.groups:
+            self.groups = list(dict.fromkeys(self.groups))
 
     def subjects(self) -> List[str]:
         res = [f"user:{self.user_id}", f"dept:{self.department}"]
@@ -216,6 +225,7 @@ class QueryRequest(BaseModel):
     purpose: str = "project_analysis"
     resource_id: Optional[str] = None
     client_supplied_filter: Optional[Dict[str, Any]] = None
+    history: Optional[List[Dict[str, Any]]] = None
 
 class Citation(BaseModel):
     citation_id: str
@@ -224,6 +234,10 @@ class Citation(BaseModel):
     locator: str
     quote: str
     verified: bool = False
+    modality: Optional[str] = "document"
+    media_url: Optional[str] = None
+    keyframe_url: Optional[str] = None
+    timestamp: Optional[str] = None
 
 class Claim(BaseModel):
     text: str

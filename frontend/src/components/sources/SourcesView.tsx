@@ -24,6 +24,10 @@ import {
   Clock,
   MoreVertical,
   ExternalLink,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Music as AudioIcon,
+  Code as CodeIcon,
 } from "lucide-react"
 import { useApp } from "../../context/AppContext"
 import { Vault, VaultDocument, UserSummary, VaultMemberGrant } from "../../types"
@@ -519,71 +523,98 @@ export const SourcesView: React.FC = () => {
 
                     {vault.documents && vault.documents.length > 0 ? (
                       <div className="grid grid-cols-1 gap-2">
-                        {vault.documents.map((doc) => (
-                          <div
-                            key={doc.resource_id}
-                            className="group/item flex items-center justify-between p-3 rounded-xl border border-border/70 bg-surface-subtle/40 hover:bg-surface-subtle hover:border-emerald-500/30 transition-all gap-3"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-                                <FileText className="h-4 w-4 text-emerald-400" />
+                        {vault.documents.map((doc) => {
+                          const ext = doc.title.split(".").pop()?.toLowerCase() || ""
+                          const isImage = ["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext) || doc.resource_type === "IMAGE_OCR"
+                          const isVideo = ["mp4", "mkv", "mov", "avi", "webm"].includes(ext) || doc.resource_type === "VIDEO"
+                          const isAudio = ["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) || doc.resource_type === "AUDIO"
+                          const isCode = ["py", "js", "ts", "tsx", "jsx", "json", "csv", "sql", "html", "css"].includes(ext) || doc.resource_type === "CODE"
+
+                          return (
+                            <div
+                              key={doc.resource_id}
+                              className="group/item flex items-center justify-between p-3 rounded-xl border border-border/70 bg-surface-subtle/40 hover:bg-surface-subtle hover:border-emerald-500/30 transition-all gap-3"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border ${
+                                  isImage ? "bg-indigo-500/10 border-indigo-500/25 text-indigo-400" :
+                                  isVideo ? "bg-amber-500/10 border-amber-500/25 text-amber-400" :
+                                  isAudio ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400" :
+                                  isCode ? "bg-sky-500/10 border-sky-500/25 text-sky-400" :
+                                  "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                                }`}>
+                                  {isImage ? <ImageIcon className="h-4 w-4" /> :
+                                   isVideo ? <VideoIcon className="h-4 w-4" /> :
+                                   isAudio ? <AudioIcon className="h-4 w-4" /> :
+                                   isCode ? <CodeIcon className="h-4 w-4" /> :
+                                   <FileText className="h-4 w-4" />}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-semibold text-foreground truncate">
+                                      {doc.title}
+                                    </span>
+                                    <Badge
+                                      variant="clearance"
+                                      className="text-[9px] py-0 px-1 font-mono"
+                                    >
+                                      L{doc.classification}
+                                    </Badge>
+                                    <span className={`text-[9px] font-mono px-1 py-0.2 rounded border uppercase font-medium ${
+                                      isImage ? "border-indigo-500/30 text-indigo-300 bg-indigo-500/5" :
+                                      isVideo ? "border-amber-500/30 text-amber-300 bg-amber-500/5" :
+                                      isAudio ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/5" :
+                                      isCode ? "border-sky-500/30 text-sky-300 bg-sky-500/5" :
+                                      "border-border/60 text-muted-foreground bg-surface-raised"
+                                    }`}>
+                                      {isImage ? "IMAGE OCR" : isVideo ? "VIDEO" : isAudio ? "AUDIO" : isCode ? "CODE" : "DOC"}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-0.5">
+                                    <span>{doc.chunks_count} Chunks</span>
+                                    <span>•</span>
+                                    <span className="font-mono text-[9px] text-muted-foreground/80">
+                                      ID: {doc.resource_id}
+                                    </span>
+                                    <span>•</span>
+                                    <span>
+                                      {doc.created_at
+                                        ? new Date(doc.created_at).toLocaleDateString()
+                                        : "Indexed"}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-foreground truncate">
-                                    {doc.title}
-                                  </span>
-                                  <Badge
-                                    variant="clearance"
-                                    className="text-[9px] py-0 px-1 font-mono"
-                                  >
-                                    L{doc.classification}
-                                  </Badge>
-                                </div>
-                                <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-0.5">
-                                  <span>{doc.chunks_count} Chunks</span>
-                                  <span>•</span>
-                                  <span className="font-mono text-[9px] text-muted-foreground/80">
-                                    ID: {doc.resource_id}
-                                  </span>
-                                  <span>•</span>
-                                  <span>
-                                    {doc.created_at
-                                      ? new Date(doc.created_at).toLocaleDateString()
-                                      : "Indexed"}
-                                  </span>
-                                </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleAskVault(vault, doc)}
+                                  className="text-xs h-7 gap-1 px-2.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-medium"
+                                >
+                                  <MessageSquare className="h-3.5 w-3.5" />
+                                  <span>Ask This File</span>
+                                </Button>
+
+                                <button
+                                  onClick={() =>
+                                    setDeletingDoc({ vaultSlug: vault.slug, doc })
+                                  }
+                                  className="p-1.5 rounded-md hover:bg-rose-500/10 text-muted-foreground hover:text-rose-400 transition-colors"
+                                  title="Delete document"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
                               </div>
                             </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleAskVault(vault, doc)}
-                                className="text-xs h-7 gap-1 px-2.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-medium"
-                              >
-                                <MessageSquare className="h-3.5 w-3.5" />
-                                <span>Ask This File</span>
-                              </Button>
-
-                              <button
-                                onClick={() =>
-                                  setDeletingDoc({ vaultSlug: vault.slug, doc })
-                                }
-                                className="p-1.5 rounded-md hover:bg-rose-500/10 text-muted-foreground hover:text-rose-400 transition-colors"
-                                title="Delete document"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : (
                       <div className="p-5 rounded-xl border border-dashed border-border/80 bg-surface-subtle/20 text-center space-y-2">
                         <p className="text-xs text-muted-foreground">
-                          No documents ingested into this folder yet.
+                          No documents or media ingested into this folder yet.
                         </p>
                         <Button
                           size="sm"
@@ -592,7 +623,7 @@ export const SourcesView: React.FC = () => {
                           className="text-xs h-7.5 gap-1.5 border-border"
                         >
                           <Upload className="h-3.5 w-3.5 text-emerald-400" />
-                          <span>Upload PDF Document</span>
+                          <span>Upload Files & Media</span>
                         </Button>
                       </div>
                     )}
