@@ -46,8 +46,12 @@ else:
     MASTER_KEK_HEX = secrets.token_hex(32)
     _MASTER_KEK_FILE.write_text(MASTER_KEK_HEX, encoding="utf-8")
 
-LEASE_TTL_SECONDS = int(os.getenv("LEASE_TTL_SECONDS", "300"))  # 5 min default
+LEASE_TTL_SECONDS = int(os.getenv("LEASE_TTL_SECONDS", "300"))  # 5 min default authorization lease
 RESTRICTED_LEASE_TTL_SECONDS = int(os.getenv("RESTRICTED_LEASE_TTL_SECONDS", "30"))  # 30s for restricted vaults
+INACTIVITY_TIMEOUT_SECONDS = int(os.getenv("INACTIVITY_TIMEOUT_SECONDS", "300"))  # 5 min default user inactivity
+INACTIVITY_WARNING_SECONDS = int(os.getenv("INACTIVITY_WARNING_SECONDS", "30"))   # 30s warning window
+TOKEN_EXPIRY_MINUTES = int(os.getenv("TOKEN_EXPIRY_MINUTES", "1440"))             # 24 hours max token lifetime
+DYNAMIC_CACHE_MAX_CHUNKS = int(os.getenv("DYNAMIC_CACHE_MAX_CHUNKS", "500"))      # bounded dynamic chunk cache
 CLOCK_SKEW_SECONDS = int(os.getenv("CLOCK_SKEW_SECONDS", "30"))
 CLOCK_JUMP_HOURS = int(os.getenv("CLOCK_JUMP_HOURS", "6"))
 

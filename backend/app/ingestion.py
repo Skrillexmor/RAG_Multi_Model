@@ -14,6 +14,7 @@ from .database import db
 from .config import STORAGE_DIR, ENCRYPTED_DIR, QUARANTINE_DIR, MEDIA_DIR
 from .crypto import compute_content_hash, derive_vault_kek, encrypt_to_file
 from .vector_store import vector_store
+from .model_manager import local_model_manager
 
 class IngestionQuarantineError(Exception):
     pass
@@ -421,8 +422,8 @@ class MultiModalIngestion:
         allowed_roles: Optional[List[str]] = None
     ) -> str:
         """
-        Parses image using Deep Learning OCR (easyocr/pytesseract) +
-        local multimodal vision understanding (Gemma-3), with web preview storage.
+        Parses image using Deep Multimodal Vision (Qwen-VL) + OCR,
+        with strict single-model RAM protection and web preview storage.
         """
         from PIL import Image
         cls.validate_upload(filename, image_bytes)
@@ -438,47 +439,9 @@ class MultiModalIngestion:
         except Exception:
             media_url = None
 
-        # 1. OCR Text Extraction (easyocr with pytesseract fallback)
-        extracted_text = ""
-        try:
-            import easyocr
-            reader = easyocr.Reader(['en'], gpu=False)
-            ocr_results = reader.readtext(io.BytesIO(image_bytes), detail=0)
-            extracted_text = " ".join(ocr_results)
-        except Exception:
-            try:
-                import pytesseract
-                extracted_text = pytesseract.image_to_string(img)
-            except Exception:
-                extracted_text = ""
-
-        # 2. Local Vision AI Captioning via Ollama / Gemma-3 (if accessible)
-        visual_caption = ""
-        try:
-            b64_img = base64.b64encode(image_bytes).decode("utf-8")
-            req_data = json.dumps({
-                "model": "gemma3:4b",
-                "prompt": "Describe in 2-3 concise factual sentences what is shown in this image, diagram, UI, chart, or table.",
-                "images": [b64_img],
-                "stream": False
-            }).encode("utf-8")
-            req = urllib.request.Request("http://127.0.0.1:11434/api/generate", data=req_data, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                v_res = json.loads(resp.read().decode("utf-8"))
-                visual_caption = v_res.get("response", "").strip()
-        except Exception:
-            visual_caption = ""
-
-        # Combine text content for indexing
-        combined_parts = []
-        if visual_caption:
-            combined_parts.append(f"Visual Analysis: {visual_caption}")
-        if extracted_text.strip():
-            combined_parts.append(f"Extracted In-Image Text: {extracted_text.strip()}")
-        if not combined_parts:
-            combined_parts.append(f"Visual image asset {filename} ({img.width}x{img.height})")
-
-        full_content = "\n\n".join(combined_parts)
+        # Execute Qwen-VL multimodal reasoning + OCR via model manager
+        analysis_result = local_model_manager.analyze_image(image_bytes, filename=filename)
+        full_content = analysis_result.get("combined_text", f"Image asset {filename}")
 
         sections = [{
             "page": 1,
@@ -590,6 +553,30 @@ class MultiModalIngestion:
             current_time += interval_sec
 
         cap.release()
+
+        # Extract audio speech track from video using Whisper
+        try:
+            audio_segments = local_model_manager.transcribe_audio(temp_video_path, filename=filename)
+            for seg in audio_segments:
+                s_text = seg.get("text", "").strip()
+                if s_text and "No spoken speech detected" not in s_text:
+                    ts = seg.get("timestamp", "00:00")
+                    sections.append({
+                        "page": sec_idx,
+                        "locator": f"Video Audio [{ts}]",
+                        "text": f"[{ts}] Spoken Dialogue: {s_text}",
+                        "classification": classification,
+                        "min_clearance": min_clearance,
+                        "acl_selector": allowed_roles or ["role:analyst", "role:viewer"],
+                        "deny_selector": [],
+                        "modality": "video_audio",
+                        "timestamp": ts,
+                        "media_url": None
+                    })
+                    sec_idx += 1
+        except Exception:
+            pass
+
         try:
             temp_video_path.unlink()
         except Exception:
@@ -629,36 +616,55 @@ class MultiModalIngestion:
         allowed_roles: Optional[List[str]] = None
     ) -> str:
         """
-        Parses audio recordings, stores playable audio track in media store,
-        and slices into timestamped audio segments.
+        Parses audio recordings using local faster-whisper speech recognition,
+        stores playable audio track in media store, and slices into timestamped
+        verbatim speech chunks with strict single-model RAM protection.
         """
         cls.validate_upload(filename, audio_bytes, max_mb=50)
 
         media_token = uuid4().hex[:10]
-        ext = Path(filename).suffix.lower()
+        ext = Path(filename).suffix.lower() or ".mp3"
         audio_filename = f"aud_{media_token}{ext}"
         audio_path = MEDIA_DIR / audio_filename
         audio_path.write_bytes(audio_bytes)
         audio_url = f"/api/media/{audio_filename}"
 
-        # Segment into timestamped windows
+        # Run Whisper speech transcription via model manager
+        transcription_segments = local_model_manager.transcribe_audio(audio_path, filename=filename)
+
         sections = []
-        for seg_idx in range(1, 4):
-            start_m = (seg_idx - 1) * 2
-            end_m = seg_idx * 2
-            time_range = f"{start_m:02d}:00 - {end_m:02d}:00"
+        for seg_idx, seg in enumerate(transcription_segments, start=1):
+            ts = seg.get("timestamp", "00:00")
+            speech_text = seg.get("text", "").strip()
+            locator = f"Audio Segment [{ts}]"
+            verbatim_chunk = f"[{ts}] {speech_text}" if speech_text else f"Audio recording segment ({ts})"
+
             sections.append({
                 "page": seg_idx,
-                "locator": f"Audio Segment [{time_range}]",
-                "text": f"Audio recording segment from {filename} ({time_range}). Playable audio asset stored.",
+                "locator": locator,
+                "text": verbatim_chunk,
                 "classification": classification,
                 "min_clearance": min_clearance,
                 "acl_selector": allowed_roles or ["role:analyst", "role:viewer"],
                 "deny_selector": [],
                 "modality": "audio",
-                "timestamp": time_range,
+                "timestamp": ts,
                 "media_url": audio_url
             })
+
+        if not sections:
+            sections = [{
+                "page": 1,
+                "locator": "Audio [00:00]",
+                "text": f"Audio file {filename} ingested into knowledge compartment.",
+                "classification": classification,
+                "min_clearance": min_clearance,
+                "acl_selector": allowed_roles or ["role:analyst", "role:viewer"],
+                "deny_selector": [],
+                "modality": "audio",
+                "timestamp": "00:00",
+                "media_url": audio_url
+            }]
 
         return cls.ingest_document(
             vault_id=vault_id,
@@ -775,11 +781,13 @@ class MultiModalIngestion:
         with db.get_connection() as conn:
             cursor = conn.cursor()
 
-            # Find all chunks
+            # Find all chunks and dynamic cached chunks
             cursor.execute("SELECT chunk_id, storage_path FROM chunks WHERE resource_id = ?", (resource_id,))
             chunk_rows = cursor.fetchall()
+            cursor.execute("SELECT chunk_id, storage_path FROM dynamic_chunks WHERE resource_id = ?", (resource_id,))
+            dyn_rows = cursor.fetchall()
 
-            for r in chunk_rows:
+            for r in list(chunk_rows) + list(dyn_rows):
                 sp = r["storage_path"]
                 if sp and Path(sp).exists():
                     try:
@@ -789,10 +797,14 @@ class MultiModalIngestion:
 
             # Delete Qdrant vectors
             vector_store.delete_resource_vectors(resource_id)
+            dyn_ids = [r["chunk_id"] for r in dyn_rows]
+            if dyn_ids:
+                vector_store.delete_points(dyn_ids)
 
-            # Delete citation spans, chunks, manifest, resource
+            # Delete citation spans, chunks, dynamic chunks, manifest, resource
             cursor.execute("DELETE FROM citation_spans WHERE resource_id = ?", (resource_id,))
             cursor.execute("DELETE FROM chunks WHERE resource_id = ?", (resource_id,))
+            cursor.execute("DELETE FROM dynamic_chunks WHERE resource_id = ?", (resource_id,))
             cursor.execute("DELETE FROM resource_manifests WHERE resource_id = ?", (resource_id,))
             cursor.execute("UPDATE resources SET status = 'deleted' WHERE resource_id = ?", (resource_id,))
 

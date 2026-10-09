@@ -76,11 +76,11 @@ export const CommandPalette: React.FC = () => {
                 <span>Start New Chat</span>
               </Command.Item>
               <Command.Item
-                onSelect={() => handleSelect(() => navigate("tests"))}
+                onSelect={() => handleSelect(() => navigate("chunks"))}
                 className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
               >
                 <RotateCw className="h-4 w-4 text-emerald-400" />
-                <span>Run 84 Security Invariant Tests</span>
+                <span>Inspect Canonical Chunk Store</span>
               </Command.Item>
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("audit"))}

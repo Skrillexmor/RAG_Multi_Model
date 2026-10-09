@@ -149,6 +149,15 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   <p className="text-[11px] text-muted-foreground font-mono">
                     {(file.size / 1024).toFixed(1)} KB
                   </p>
+                  <div className="pt-1 flex items-center justify-center gap-1.5 text-[11px]">
+                    <span className="text-muted-foreground">Assigned AI Engine:</span>
+                    <span className="font-semibold text-emerald-400 font-mono">
+                      {category === "audio" && "🎙️ Whisper Base (Speech-to-Text)"}
+                      {category === "image" && "👁️ Qwen 2.5-VL 3B (Vision & OCR)"}
+                      {category === "video" && "🎬 Whisper + Qwen-VL (Video AI)"}
+                      {(category === "document" || category === "code") && "💬 Gemma 3 4B (Structure Parser)"}
+                    </span>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-1.5">

@@ -112,6 +112,45 @@ export const LlmAssistantModal: React.FC = () => {
           </Button>
         </div>
 
+        {/* Local Multimodal Engines & RAM Guard */}
+        <div className="p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Multimodal Engines & Laptop RAM Guard
+            </span>
+            <Badge variant="secondary" className="text-[10px] bg-emerald-500/20 text-emerald-300 border-emerald-500/30">
+              Single-Model Working Mode Active
+            </Badge>
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Strict laptop RAM constraint enforced: at any time, <strong>only one model</strong> is in working memory. Idle models are immediately put on rest (<code className="text-emerald-300 font-mono">keep_alive: 0</code>) to prevent laptop lag or OOM crashes.
+          </p>
+          <div className="grid grid-cols-3 gap-2 pt-1 text-[11px]">
+            <div className="p-2 rounded-lg bg-surface border border-border/60">
+              <span className="font-semibold text-foreground block">🎙️ Audio Engine</span>
+              <span className="text-emerald-400 font-mono text-[10px]">Whisper (int8 CPU)</span>
+              <span className="text-[9px] text-muted-foreground block mt-0.5">Auto-detects .mp3, .wav, .m4a</span>
+            </div>
+            <div className="p-2 rounded-lg bg-surface border border-border/60">
+              <span className="font-semibold text-foreground block">👁️ Vision Engine</span>
+              <span className="text-purple-400 font-mono text-[10px]">Qwen 2.5-VL 3B</span>
+              <span className="text-[9px] text-muted-foreground block mt-0.5">Auto-detects .png, .jpg, .webp</span>
+            </div>
+            <div className="p-2 rounded-lg bg-surface border border-border/60">
+              <span className="font-semibold text-foreground block">💬 Chat Engine</span>
+              <span className="text-blue-400 font-mono text-[10px]">Gemma 3 4B</span>
+              <span className="text-[9px] text-muted-foreground block mt-0.5">Grounded RAG synthesis</span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/30">
+            <span>Current memory state:</span>
+            <span className="font-mono text-emerald-300 font-medium">
+              {llmStatus?.current_working_model || "none (all on rest)"}
+            </span>
+          </div>
+        </div>
+
         {/* Recommended Models Section */}
         <div className="space-y-2 pt-1">
           <div className="flex items-center justify-between">

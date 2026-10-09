@@ -15,9 +15,10 @@ if assets_dir.exists():
 
 @app.get("/{full_path:path}")
 async def serve_spa(request: Request, full_path: str):
-    # Pass through API and system endpoints
+    # Pass through API and system endpoints (return true 404 for unknown endpoints)
     if full_path.startswith("api") or full_path.startswith("health"):
-        return {"error": "Not Found"}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="API endpoint not found")
 
     file_path = FRONTEND_DIR / full_path
     if full_path and file_path.is_file():

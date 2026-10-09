@@ -9,12 +9,14 @@ import { AccessView } from "../security/AccessView"
 import { FederationView } from "../security/FederationView"
 import { AuditView } from "../security/AuditView"
 import { SecurityTestsView } from "../security/SecurityTestsView"
+import { ChunkStoreView } from "../chunks/ChunkStoreView"
 import { SettingsView } from "../settings/SettingsView"
 import { EvidenceInspector } from "../evidence/EvidenceInspector"
 import { SecurityTraceDrawer } from "../evidence/SecurityTraceDrawer"
 import { CommandPalette } from "../command/CommandPalette"
 import { RequestAccessModal } from "../security/RequestAccessModal"
 import { AuthModal } from "../auth/AuthModal"
+import { SessionWarningModal } from "../auth/SessionWarningModal"
 import { LlmAssistantModal } from "../settings/LlmAssistantModal"
 import { Toaster } from "sonner"
 
@@ -37,8 +39,9 @@ export const AppShell: React.FC = () => {
         return <FederationView />
       case "audit":
         return <AuditView />
+      case "chunks":
       case "tests":
-        return <SecurityTestsView />
+        return <ChunkStoreView />
       case "settings":
         return <SettingsView />
       default:
@@ -87,6 +90,9 @@ export const AppShell: React.FC = () => {
 
       {/* Auth & Registration Modal */}
       <AuthModal />
+
+      {/* Authoritative 30s Inactivity Warning Modal */}
+      <SessionWarningModal />
 
       {/* Local LLM Setup & Models Modal */}
       <LlmAssistantModal />

@@ -11,6 +11,12 @@ import {
   TimeStatus,
   LlmStatus,
   RetrievalSecurityTrace,
+  MultimodalModelStatus,
+  ModelDetectionResult,
+  ChunkRecord,
+  ChunkListResponse,
+  RetrievalMode,
+  SessionStatus,
 } from "../types"
 
 const API_BASE = ""
@@ -29,15 +35,17 @@ class ApiClient {
   private token: string | null = null
 
   constructor() {
-    this.token = sessionStorage.getItem("rag_token")
+    this.token = sessionStorage.getItem("rag_token") || localStorage.getItem("rag_token")
   }
 
   setToken(token: string | null) {
     this.token = token
     if (token) {
       sessionStorage.setItem("rag_token", token)
+      localStorage.setItem("rag_token", token)
     } else {
       sessionStorage.removeItem("rag_token")
+      localStorage.removeItem("rag_token")
     }
   }
 
@@ -175,8 +183,9 @@ class ApiClient {
       actions?: string[]
       valid_hours?: number
       is_delegable?: boolean
+      resource_id?: string
     }
-  ): Promise<{ message: string; grants_created: number }> {
+  ): Promise<{ message: string; grants_created: number; resource_id?: string }> {
     return this.request(`/api/vaults/${vaultSlugOrId}/assign`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -188,12 +197,20 @@ class ApiClient {
     vault_name: string
     members: Array<{
       grant_id: string
+      vault_id?: string
+      grantee_type?: string
       grantee_id: string
       actions: string[]
       valid_from: string
       valid_until: string
-      delegable: boolean
+      delegable?: boolean
       state: string
+      username?: string
+      department?: string
+      clearance?: number
+      resource_id?: string | null
+      resource_title?: string | null
+      selector?: any
     }>
   }> {
     return this.request(`/api/vaults/${vaultSlugOrId}/members`)
@@ -206,7 +223,7 @@ class ApiClient {
       actions: string[]
       valid_from: string
       valid_until: string
-      delegable: boolean
+      delegable?: boolean
       state: string
     }>
   }> {
@@ -304,9 +321,10 @@ class ApiClient {
     query: string,
     purpose = "general_query",
     resourceId?: string,
-    history?: Array<{ role: string; content: string }>
+    history?: Array<{ role: string; content: string }>,
+    retrievalMode: RetrievalMode = "LOW"
   ): Promise<RagQueryResponse> {
-    const payload: Record<string, any> = { query, purpose }
+    const payload: Record<string, any> = { query, purpose, retrieval_mode: retrievalMode }
     if (resourceId) {
       payload.resource_id = resourceId
     }
@@ -324,6 +342,7 @@ class ApiClient {
       request_id: rawTrace.request_id || `req_${Date.now()}`,
       principal: rawTrace.user_id || "principal",
       vault: rawTrace.vault_slug || vaultSlug,
+      retrieval_mode: res.retrieval_mode || rawTrace.retrieval_mode || retrievalMode,
       gate_a: rawTrace.gate_a || {
         compiled_filter_valid: true,
         candidates_count: rawTrace.gate_a_candidates_count ?? 0,
@@ -349,6 +368,7 @@ class ApiClient {
       mode: res.security_trace?.generation_mode || "GROUNDED",
       refusal_reason: res.security_trace?.refusal_reason,
       security_trace: normalizedTrace,
+      retrieval_mode: res.retrieval_mode || rawTrace.retrieval_mode || retrievalMode,
     }
   }
 
@@ -454,6 +474,68 @@ class ApiClient {
     return this.request("/api/security-tests/run", {
       method: "POST",
     })
+  }
+
+  // --- Multi-Modal Model Manager & Single-Model RAM Protection ---
+  async getMultimodalModelStatus(): Promise<MultimodalModelStatus> {
+    return this.request("/api/models/status")
+  }
+
+  async unloadAllModels(): Promise<{ status: string; message: string }> {
+    return this.request("/api/models/unload", {
+      method: "POST",
+    })
+  }
+
+  async detectModelForFile(filename: string): Promise<ModelDetectionResult> {
+    return this.request(`/api/models/detect?filename=${encodeURIComponent(filename)}`)
+  }
+
+  // --- Chunk Store & Canonical Knowledge ---
+  async getChunks(params?: {
+    vault_slug?: string
+    resource_id?: string
+    modality?: string
+    search?: string
+    limit?: number
+    offset?: number
+  }): Promise<ChunkListResponse> {
+    const query = new URLSearchParams()
+    if (params?.vault_slug) query.set("vault_slug", params.vault_slug)
+    if (params?.resource_id) query.set("resource_id", params.resource_id)
+    if (params?.modality) query.set("modality", params.modality)
+    if (params?.search) query.set("search", params.search)
+    if (params?.limit) query.set("limit", String(params.limit))
+    if (params?.offset) query.set("offset", String(params.offset))
+    const qs = query.toString()
+    return this.request(`/api/chunks${qs ? `?${qs}` : ""}`)
+  }
+
+  // --- Authoritative Inactivity & Session Management ---
+  async recordActivity(): Promise<{ status: string; last_active_at: string; remaining_seconds: number }> {
+    return this.request("/api/auth/activity", {
+      method: "POST",
+    })
+  }
+
+  async renewSession(): Promise<{ status: string; message: string; remaining_seconds: number; last_active_at: string }> {
+    return this.request("/api/auth/session/renew", {
+      method: "POST",
+    })
+  }
+
+  async getSessionStatus(): Promise<SessionStatus> {
+    return this.request("/api/auth/session/status")
+  }
+
+  async logout(): Promise<{ status: string; message: string }> {
+    try {
+      return await this.request("/api/auth/logout", {
+        method: "POST",
+      })
+    } finally {
+      this.setToken(null)
+    }
   }
 }
 

@@ -313,7 +313,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 
         {/* Security Summary Component (§39) */}
         {message.securityTrace && (
-          <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground flex-wrap gap-2">
             <button
               onClick={() => openTraceInspector(message.securityTrace!)}
               className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors group cursor-pointer"
@@ -335,9 +335,25 @@ export const MessageItem: React.FC<MessageItemProps> = ({
               </span>
             </button>
 
-            <span className="font-mono text-[10px] text-muted-foreground/60">
-              Closed-World Invariant ✓
-            </span>
+            <div className="flex items-center gap-2">
+              {(message.securityTrace.retrieval_mode || message.retrievalMode) && (
+                <span
+                  className={`text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded border ${
+                    (message.securityTrace.retrieval_mode || message.retrievalMode) === "LOW"
+                      ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/5"
+                      : (message.securityTrace.retrieval_mode || message.retrievalMode) === "MEDIUM"
+                      ? "border-blue-500/40 text-blue-400 bg-blue-500/5"
+                      : "border-purple-500/40 text-purple-400 bg-purple-500/5"
+                  }`}
+                  title={`Query resolved with ${message.securityTrace.retrieval_mode || message.retrievalMode} retrieval pipeline`}
+                >
+                  {message.securityTrace.retrieval_mode || message.retrievalMode} MODE
+                </span>
+              )}
+              <span className="font-mono text-[10px] text-muted-foreground/60">
+                Closed-World Invariant ✓
+              </span>
+            </div>
           </div>
         )}
       </div>

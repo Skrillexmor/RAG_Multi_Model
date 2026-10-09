@@ -141,10 +141,27 @@ export interface EvidenceItem {
   proof: AuthorizationProofObject
 }
 
+export type RetrievalMode = "LOW" | "MEDIUM" | "HIGH"
+
+export interface SessionStatus {
+  active: boolean
+  is_active?: boolean
+  remaining_seconds: number
+  inactivity_timeout_seconds?: number
+  warning_threshold_seconds?: number
+  is_warning: boolean
+  last_active_at?: string
+  expires_at?: string
+  username?: string
+  user_id?: string
+  reason?: string
+}
+
 export interface RetrievalSecurityTrace {
   request_id: string
   principal: string
   vault: string
+  retrieval_mode?: RetrievalMode
   gate_a: {
     compiled_filter_valid: boolean
     candidates_count: number
@@ -170,6 +187,7 @@ export interface RagQueryResponse {
   refusal_reason?: string
   security_trace?: RetrievalSecurityTrace
   lease_deadline?: string
+  retrieval_mode?: RetrievalMode
 }
 
 export interface AuditEvent {
@@ -217,11 +235,44 @@ export interface LlmStatus {
   active_model: string
   installed_models: string[]
   recommended_models: string[]
+  multimodal_models?: {
+    vision?: string
+    chat?: string
+    audio?: string
+  }
+  single_model_policy_active?: boolean
+  current_working_model?: string
   setup_guide: {
     step1: string
     step2: string
     step3: string
   }
+}
+
+export interface MultimodalModelStatus {
+  active_model: string | null
+  state: "ACTIVE" | "IDLE_ON_REST"
+  ram_protection: string
+  supported_modalities: {
+    audio: string
+    video: string
+    image: string
+    document: string
+  }
+  available_models: {
+    vision: string
+    llm: string
+    speech: string
+  }
+}
+
+export interface ModelDetectionResult {
+  model_id: string
+  model_name: string
+  modality: "audio" | "image" | "video" | "document"
+  badge: string
+  description: string
+  ram_mode?: string
 }
 
 // Conversation and Chat UI types
@@ -236,6 +287,7 @@ export interface Message {
   status?: "pending" | "complete" | "error"
   mode?: "GROUNDED" | "SAFE_EXTRACTIVE_MODE" | "REFUSAL"
   refusalReason?: string
+  retrievalMode?: RetrievalMode
   vaultSlug?: string
   selectedFileId?: string
   selectedFileName?: string
@@ -272,4 +324,39 @@ export interface VaultMemberGrant {
   valid_until: string
   delegable: boolean
   state: string
+}
+
+export interface ChunkRecord {
+  chunk_id: string
+  resource_id: string
+  resource_title: string
+  resource_type: string
+  vault_id: string
+  vault_slug: string
+  vault_name: string
+  chunk_index: number
+  content: string
+  content_hash: string
+  classification: number
+  min_clearance: number
+  is_encrypted: boolean
+  integrity_verified: boolean
+  modality: "audio" | "image" | "video" | "document" | "code" | string
+  locator: string
+  media_url?: string | null
+  timestamp?: string | null
+  page?: number | null
+  created_at: string
+}
+
+export interface ChunkListResponse {
+  total: number
+  limit: number
+  offset: number
+  chunks: ChunkRecord[]
+  stats: {
+    total_chunks: number
+    total_encrypted: number
+    modalities: Record<string, number>
+  }
 }

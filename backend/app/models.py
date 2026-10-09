@@ -218,6 +218,9 @@ class AccessRequest(BaseModel):
     approvals_count: int = 0
     created_at: str
 
+# Retrieval Modes (Part 1)
+RetrievalMode = Literal["LOW", "MEDIUM", "HIGH"]
+
 # Query API Contract
 class QueryRequest(BaseModel):
     vault_slug: Optional[str] = None
@@ -226,6 +229,7 @@ class QueryRequest(BaseModel):
     resource_id: Optional[str] = None
     client_supplied_filter: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, Any]]] = None
+    retrieval_mode: RetrievalMode = "LOW"
 
 class Citation(BaseModel):
     citation_id: str
@@ -257,6 +261,7 @@ class RetrievalSecurityTrace(BaseModel):
     generation_mode: Literal["LLM_GROUNDED", "SAFE_EXTRACTIVE_MODE", "ANSWER_BLOCKED"] = "LLM_GROUNDED"
     answer_status: Literal["GROUNDED", "REFUSED", "CITATION_MISMATCH", "SAFE_EXTRACTIVE"]
     refusal_reason: Optional[str] = None
+    retrieval_mode: Optional[str] = "LOW"
     gate_a: Optional[Dict[str, Any]] = None
     gate_b: Optional[Dict[str, Any]] = None
     grounding: Optional[Dict[str, Any]] = None
@@ -270,6 +275,7 @@ class QueryResponse(BaseModel):
     evidence_items: List[EvidenceItem]
     security_trace: RetrievalSecurityTrace
     lease_deadline: str
+    retrieval_mode: Optional[str] = "LOW"
 
 class AuditCheckpoint(BaseModel):
     checkpoint_id: str

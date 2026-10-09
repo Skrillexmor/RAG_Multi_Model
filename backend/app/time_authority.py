@@ -118,6 +118,16 @@ class TimeAuthority:
 
             # Check clock jump
             if wall > last_seen + self.jump:
+                from .config import DEMO_MODE
+                if DEMO_MODE:
+                    # In local demo/dev mode, laptop sleep/wake cycles auto-sync gracefully
+                    st["time_floor"] = wall.isoformat()
+                    st["last_seen"] = wall.isoformat()
+                    st["status"] = "OK"
+                    st["hash"] = hashlib.sha256(f"{wall.isoformat()}".encode()).hexdigest()
+                    self._save_state(st)
+                    return TrustedTime(timestamp=wall, status="OK")
+
                 st["status"] = "CLOCK_JUMP_QUARANTINE"
                 self._save_state(st)
                 return TrustedTime(

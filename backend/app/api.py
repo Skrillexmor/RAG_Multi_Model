@@ -8,10 +8,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import jwt
 from uuid import uuid4
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from .config import JWT_SECRET, JWT_ALGORITHM, DEMO_MODE, TEST_MODE
+from .config import (
+    JWT_SECRET, JWT_ALGORITHM, DEMO_MODE, TEST_MODE,
+    INACTIVITY_TIMEOUT_SECONDS, TOKEN_EXPIRY_MINUTES
+)
 from .models import (
     Principal, Vault, Grant, QueryRequest, QueryResponse,
     RetrievalSecurityTrace, EvidenceItem, Citation, Claim,
@@ -20,7 +24,10 @@ from .models import (
 )
 from .database import db
 from .time_authority import time_authority
-from .crypto import sign_grant_payload, verify_password, hash_password
+from .crypto import (
+    sign_grant_payload, verify_password, hash_password,
+    derive_vault_kek, decrypt_from_file, compute_content_hash
+)
 from .policy_engine import PolicyEngine, ScopeViolation, DelegationViolation
 from .policy_compiler import PolicyCompiler
 from .vector_store import vector_store, SecurityContractViolation
@@ -31,6 +38,9 @@ from .audit import audit_service
 from .access_service import access_service, AccessServiceError
 from .federation import federation_service, FederationError
 from .ingestion import ingestion_pipeline, IngestionQuarantineError
+from .model_manager import local_model_manager
+from .session_service import session_service, SessionError
+from .retrieval_modes import retrieval_pipeline
 
 app = FastAPI(
     title="DARS-RAG: Data-Authorization and Retrieval Security RAG",
@@ -64,11 +74,12 @@ def on_startup():
     vector_store.sync_all_from_database()
 
 # ----------------- AUTHENTICATION DEPENDENCY (§3.1) -----------------
-def get_current_principal(authorization: Optional[str] = Header(None)) -> Principal:
+def get_current_principal(request: Request = None, authorization: Optional[str] = Header(None)) -> Principal:
     """
     Authoritative request authenticator.
     Fail-closed: Missing or invalid token ALWAYS returns 401 Unauthorized (§3.1).
-    Zero fallback to mock users!
+    Validates server-side user inactivity timeout (300s default) on every protected request.
+    Background polling endpoints validate session without resetting inactivity countdown.
     """
     if not authorization:
         raise HTTPException(
@@ -90,6 +101,29 @@ def get_current_principal(authorization: Optional[str] = Header(None)) -> Princi
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Session expired due to policy epoch invalidation (T-AUTH-005)."
             )
+
+        # Server-Side Inactivity & Revocation Validation (§3.1, T-SESS-001, T-SESS-002)
+        token_jti = payload.get("jti")
+        if token_jti:
+            path = request.url.path if request else ""
+            method = request.method if request else "GET"
+            # Background polling endpoints do NOT reset inactivity
+            is_background_poll = (
+                path in (
+                    "/api/auth/session/status", "/api/time/status",
+                    "/api/llm/status", "/api/models/status", "/api/auth/me"
+                )
+                or (method == "GET" and not path.startswith("/api/auth/activity"))
+            )
+            is_genuine = not is_background_poll
+
+            try:
+                session_service.validate_session(token_jti, p.user_id, is_genuine_activity=is_genuine)
+            except SessionError as se:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=se.message)
+        elif not TEST_MODE:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session identifier missing from token.")
+
         return p
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token signature or expired (T-AUTH-004).")
@@ -111,6 +145,7 @@ def login(req: LoginRequest):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials (T-AUTH-001).")
 
     principal = PolicyEngine.get_principal_by_username(req.username.strip().lower())
+    session_id, token_jti = session_service.create_session(principal.user_id)
     token_payload = {
         "sub": principal.username,
         "user_id": principal.user_id,
@@ -118,13 +153,17 @@ def login(req: LoginRequest):
         "roles": principal.roles,
         "clearance": principal.clearance,
         "auth_epoch": principal.auth_epoch,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=12)
+        "jti": token_jti,
+        "session_id": session_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=TOKEN_EXPIRY_MINUTES)
     }
     token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return {
         "access_token": token,
         "token_type": "bearer",
-        "principal": principal
+        "principal": principal,
+        "session_id": session_id,
+        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS
     }
 
 class RegisterRequest(BaseModel):
@@ -231,6 +270,7 @@ def register(req: RegisterRequest):
     if not principal:
         raise HTTPException(status_code=500, detail="Failed to load newly registered principal.")
 
+    session_id, token_jti = session_service.create_session(principal.user_id)
     token_payload = {
         "sub": principal.username,
         "user_id": principal.user_id,
@@ -238,13 +278,17 @@ def register(req: RegisterRequest):
         "roles": principal.roles,
         "clearance": principal.clearance,
         "auth_epoch": principal.auth_epoch,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=12)
+        "jti": token_jti,
+        "session_id": session_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=TOKEN_EXPIRY_MINUTES)
     }
     token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return {
         "access_token": token,
         "token_type": "bearer",
         "principal": principal,
+        "session_id": session_id,
+        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
         "message": "User registered successfully."
     }
 
@@ -264,6 +308,7 @@ def switch_persona(req: SwitchPersonaRequest):
     if not principal:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found.")
 
+    session_id, token_jti = session_service.create_session(principal.user_id)
     token_payload = {
         "sub": principal.username,
         "user_id": principal.user_id,
@@ -271,18 +316,94 @@ def switch_persona(req: SwitchPersonaRequest):
         "roles": principal.roles,
         "clearance": principal.clearance,
         "auth_epoch": principal.auth_epoch,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=12)
+        "jti": token_jti,
+        "session_id": session_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=TOKEN_EXPIRY_MINUTES)
     }
     token = jwt.encode(token_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return {
         "access_token": token,
         "token_type": "bearer",
-        "principal": principal
+        "principal": principal,
+        "session_id": session_id,
+        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS
     }
 
 @app.get("/api/auth/me")
 def get_me(principal: Principal = Depends(get_current_principal)):
     return principal
+
+@app.post("/api/auth/activity")
+def record_user_activity(authorization: Optional[str] = Header(None)):
+    """Resets user inactivity timer when genuine UI interaction occurs (§3.1)."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authentication token required.")
+    token = authorization.replace("Bearer ", "").strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        jti = payload.get("jti") or payload.get("session_id")
+        user_id = payload.get("user_id")
+        if not jti and user_id:
+            jti = f"jti_{user_id}"
+        if not jti:
+            raise HTTPException(status_code=401, detail="Session identifier missing.")
+        return session_service.record_activity(jti, user_id=user_id)
+    except SessionError as e:
+        raise HTTPException(status_code=401, detail=e.message)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+
+@app.post("/api/auth/session/renew")
+def renew_user_session(authorization: Optional[str] = Header(None)):
+    """Server-side session renewal called when user confirms presence on 30s warning modal (§3.1)."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authentication token required.")
+    token = authorization.replace("Bearer ", "").strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        jti = payload.get("jti") or payload.get("session_id")
+        user_id = payload.get("user_id")
+        if not jti and user_id:
+            jti = f"jti_{user_id}"
+        if not jti:
+            raise HTTPException(status_code=401, detail="Session identifier missing.")
+        return session_service.renew_session(jti, user_id=user_id)
+    except SessionError as e:
+        raise HTTPException(status_code=401, detail=e.message)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token.")
+
+@app.get("/api/auth/session/status")
+def get_session_status(authorization: Optional[str] = Header(None)):
+    """Returns authoritative remaining inactivity seconds (does NOT reset timer) (§3.1)."""
+    if not authorization:
+        return {"is_active": False, "remaining_seconds": 0, "is_warning": False}
+    token = authorization.replace("Bearer ", "").strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        jti = payload.get("jti") or payload.get("session_id")
+        user_id = payload.get("user_id")
+        if not jti and user_id:
+            jti = f"jti_{user_id}"
+        if not jti:
+            return {"is_active": False, "remaining_seconds": 0, "is_warning": False}
+        return session_service.get_session_status(jti, user_id=user_id)
+    except Exception:
+        return {"is_active": False, "remaining_seconds": 0, "is_warning": False}
+
+@app.post("/api/auth/logout")
+def logout(authorization: Optional[str] = Header(None)):
+    """Explicitly revokes session in database to prevent token replay (§3.1)."""
+    if authorization:
+        token = authorization.replace("Bearer ", "").strip()
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            jti = payload.get("jti")
+            if jti:
+                session_service.revoke_session(jti)
+        except Exception:
+            pass
+    return {"status": "LOGGED_OUT"}
 
 # ----------------- LOCAL LLM STATUS & SETUP GUIDE -----------------
 @app.get("/api/llm/status")
@@ -328,11 +449,48 @@ def list_vaults(principal: Principal = Depends(get_current_principal)):
                 """, (v_id,))
                 doc_rows = cursor.fetchall()
                 
-                # Filter documents by clearance: users only see files at or below their clearance level unless owner/admin
+                # Determine accessible documents based on grants and manifests
                 accessible_docs = []
-                for d in doc_rows:
-                    if is_admin or is_owner or (d["classification"] <= principal.clearance):
-                        accessible_docs.append(dict(d))
+                if is_admin or is_owner:
+                    accessible_docs = [dict(d) for d in doc_rows]
+                else:
+                    vault_grants = [g for g in usable if g.vault_id == v_id]
+                    has_all_folder_grant = any(
+                        (not g.selector or g.selector.get("all") is True or not g.selector.get("resource_id"))
+                        for g in vault_grants
+                    )
+                    granted_res_ids = {
+                        g.selector.get("resource_id")
+                        for g in vault_grants
+                        if g.selector and g.selector.get("resource_id")
+                    }
+
+                    for d in doc_rows:
+                        res_id = d["resource_id"]
+                        # 1. Direct grant for this specific resource
+                        if res_id in granted_res_ids:
+                            accessible_docs.append(dict(d))
+                            continue
+
+                        # 2. Folder-wide grant with clearance or explicit manifest access
+                        if has_all_folder_grant:
+                            if d["classification"] <= principal.clearance:
+                                accessible_docs.append(dict(d))
+                                continue
+
+                            # Check if user explicitly allowed in resource manifest
+                            cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
+                            m_row = cursor.fetchone()
+                            if m_row:
+                                u_list = json.loads(m_row["allowed_users"] or "[]")
+                                r_list = json.loads(m_row["allowed_roles"] or "[]")
+                                if (
+                                    principal.user_id in u_list
+                                    or f"user:{principal.user_id}" in u_list
+                                    or any(r in r_list or f"role:{r}" in r_list for r in principal.roles)
+                                ):
+                                    accessible_docs.append(dict(d))
+                                    continue
 
                 v_dict["documents"] = accessible_docs
                 v_dict["document_count"] = len(accessible_docs)
@@ -347,10 +505,12 @@ def list_vaults(principal: Principal = Depends(get_current_principal)):
 
 @app.get("/api/vaults/{vault_slug}/documents")
 def get_vault_documents(vault_slug: str, principal: Principal = Depends(get_current_principal)):
-    """Returns all documents ingested in a specific vault."""
+    """Returns all documents ingested in a specific vault authorized for caller."""
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
     vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+    is_owner = vault.owner_id == principal.user_id
 
     with db.get_connection() as conn:
         cursor = conn.cursor()
@@ -361,9 +521,48 @@ def get_vault_documents(vault_slug: str, principal: Principal = Depends(get_curr
             WHERE vault_id = ? AND status = 'active'
             ORDER BY created_at DESC
         """, (vault.vault_id,))
-        rows = cursor.fetchall()
+        doc_rows = cursor.fetchall()
 
-    return {"vault_slug": vault.slug, "documents": [dict(r) for r in rows]}
+        accessible_docs = []
+        if is_admin or is_owner:
+            accessible_docs = [dict(d) for d in doc_rows]
+        else:
+            vault_grants = [g for g in usable if g.vault_id == vault.vault_id]
+            has_all_folder_grant = any(
+                (not g.selector or g.selector.get("all") is True or not g.selector.get("resource_id"))
+                for g in vault_grants
+            )
+            granted_res_ids = {
+                g.selector.get("resource_id")
+                for g in vault_grants
+                if g.selector and g.selector.get("resource_id")
+            }
+
+            for d in doc_rows:
+                res_id = d["resource_id"]
+                if res_id in granted_res_ids:
+                    accessible_docs.append(dict(d))
+                    continue
+
+                if has_all_folder_grant:
+                    if d["classification"] <= principal.clearance:
+                        accessible_docs.append(dict(d))
+                        continue
+
+                    cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
+                    m_row = cursor.fetchone()
+                    if m_row:
+                        u_list = json.loads(m_row["allowed_users"] or "[]")
+                        r_list = json.loads(m_row["allowed_roles"] or "[]")
+                        if (
+                            principal.user_id in u_list
+                            or f"user:{principal.user_id}" in u_list
+                            or any(r in r_list or f"role:{r}" in r_list for r in principal.roles)
+                        ):
+                            accessible_docs.append(dict(d))
+                            continue
+
+    return {"vault_slug": vault.slug, "documents": accessible_docs}
 
 # ----------------- FOLDER / VAULT CRUD & ASSIGNMENT ENDPOINTS -----------------
 class CreateVaultRequest(BaseModel):
@@ -395,6 +594,7 @@ class AssignVaultRequest(BaseModel):
     valid_hours: Optional[int] = None
     is_delegable: Optional[bool] = False
     purpose: Optional[str] = "folder_assignment"
+    resource_id: Optional[str] = None
 
 @app.post("/api/vaults")
 def create_vault(body: CreateVaultRequest, principal: Principal = Depends(get_current_principal)):
@@ -616,26 +816,28 @@ def assign_vault(vault_slug_or_id: str, body: AssignVaultRequest, principal: Pri
             raise HTTPException(status_code=403, detail="Unauthorized: Only folder owner can assign permissions.")
 
         # Determine target grantees
-        grantees_to_add = [] # tuples of (grantee_type, formatted_grantee_id)
+        grantees_to_add = [] # tuples of (grantee_type, formatted_grantee_id, clearance)
         if body.user_ids:
             for uid in body.user_ids:
-                cursor.execute("SELECT user_id FROM users WHERE username = ? OR user_id = ?", (uid.lower(), uid))
+                clean_uid = uid.replace("user:", "").strip().lower()
+                cursor.execute("SELECT user_id, clearance FROM users WHERE LOWER(username) = ? OR LOWER(user_id) = ?", (clean_uid, clean_uid))
                 u_row = cursor.fetchone()
                 if u_row:
-                    grantees_to_add.append(("user", f"user:{u_row['user_id']}"))
+                    grantees_to_add.append(("user", f"user:{u_row['user_id']}", u_row["clearance"]))
         elif body.role_names:
             for rname in body.role_names:
-                grantees_to_add.append(("role", f"role:{rname.lower()}"))
+                clean_rname = rname.replace("role:", "").strip().lower()
+                grantees_to_add.append(("role", f"role:{clean_rname}", 1))
         elif body.grantee_id:
             g_type = body.grantee_type or "user"
-            target_raw = body.grantee_id.strip()
+            target_raw = body.grantee_id.replace("user:", "").replace("role:", "").strip().lower()
             if g_type == "user":
-                cursor.execute("SELECT user_id FROM users WHERE username = ? OR user_id = ?", (target_raw.lower(), target_raw))
+                cursor.execute("SELECT user_id, clearance FROM users WHERE LOWER(username) = ? OR LOWER(user_id) = ?", (target_raw, target_raw))
                 u_row = cursor.fetchone()
                 if u_row:
-                    grantees_to_add.append(("user", f"user:{u_row['user_id']}"))
+                    grantees_to_add.append(("user", f"user:{u_row['user_id']}", u_row["clearance"]))
             else:
-                grantees_to_add.append(("role", f"role:{target_raw.lower()}"))
+                grantees_to_add.append(("role", f"role:{target_raw}", 1))
 
         if not grantees_to_add:
             raise HTTPException(status_code=400, detail="No valid users or roles specified for assignment.")
@@ -651,22 +853,36 @@ def assign_vault(vault_slug_or_id: str, body: AssignVaultRequest, principal: Pri
         else:
             valid_until = (now + timedelta(days=365)).isoformat()
 
-        actions = body.actions or [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE]
+        raw_actions = body.actions or [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE]
+        clean_actions = []
+        for act in raw_actions:
+            c_act = act[7:] if act.startswith("action:") else act
+            if c_act not in clean_actions:
+                clean_actions.append(c_act)
+        if not clean_actions:
+            clean_actions = [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE]
+
         delegable = bool(body.is_delegable)
         grants_created = 0
+        last_gid = None
 
-        for g_type, grantee_formatted in grantees_to_add:
+        selector_dict: Dict[str, Any] = {"all": True}
+        if body.resource_id:
+            selector_dict = {"resource_id": body.resource_id}
+
+        for g_type, grantee_formatted, grantee_clearance in grantees_to_add:
             gid = f"g_assign_{uuid4().hex[:8]}"
+            last_gid = gid
             grant_dict = {
                 "grant_id": gid,
                 "vault_id": vid,
                 "grantee_type": g_type,
                 "grantee_id": grantee_formatted,
-                "selector": {"all": True},
-                "actions": actions,
+                "selector": selector_dict,
+                "actions": clean_actions,
                 "valid_from": now_iso,
                 "valid_until": valid_until,
-                "purpose": body.purpose or "folder_assignment",
+                "purpose": body.purpose or ("file_assignment" if body.resource_id else "folder_assignment"),
                 "delegable": delegable,
                 "depth": 1 if delegable else 0,
                 "parent_grant_id": None,
@@ -679,30 +895,56 @@ def assign_vault(vault_slug_or_id: str, body: AssignVaultRequest, principal: Pri
                     valid_from, valid_until, purpose, delegable, depth, parent_grant_id,
                     issuer_id, state, signature, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'active', ?, ?)
-            """, (gid, vid, g_type, grantee_formatted, json.dumps({"all": True}),
-                  json.dumps(actions), now_iso, valid_until, body.purpose or "folder_assignment",
+            """, (gid, vid, g_type, grantee_formatted, json.dumps(selector_dict),
+                  json.dumps(clean_actions), now_iso, valid_until,
+                  body.purpose or ("file_assignment" if body.resource_id else "folder_assignment"),
                   1 if delegable else 0, 1 if delegable else 0,
                   principal.user_id, sig, now_iso))
             cursor.execute("INSERT OR IGNORE INTO grant_usage (grant_id, queries, evidence, bytes) VALUES (?, 0, 0, 0)", (gid,))
             grants_created += 1
 
+            # If assigning access to a specific file, also update resource manifest ACL
+            if body.resource_id:
+                cursor.execute("SELECT allowed_users, allowed_roles, min_clearance FROM resource_manifests WHERE resource_id = ?", (body.resource_id,))
+                m_row = cursor.fetchone()
+                if m_row:
+                    if g_type == "user":
+                        users_list = json.loads(m_row["allowed_users"] or "[]")
+                        raw_uid = grantee_formatted.replace("user:", "")
+                        if raw_uid not in users_list:
+                            users_list.append(raw_uid)
+                        new_min = m_row["min_clearance"]
+                        if grantee_clearance < new_min:
+                            new_min = grantee_clearance
+                        cursor.execute("UPDATE resource_manifests SET allowed_users = ?, min_clearance = ?, acl_version = acl_version + 1 WHERE resource_id = ?", (json.dumps(users_list), new_min, body.resource_id))
+                    else:
+                        roles_list = json.loads(m_row["allowed_roles"] or "[]")
+                        raw_role = grantee_formatted.replace("role:", "")
+                        if raw_role not in roles_list:
+                            roles_list.append(raw_role)
+                        cursor.execute("UPDATE resource_manifests SET allowed_roles = ?, acl_version = acl_version + 1 WHERE resource_id = ?", (json.dumps(roles_list), body.resource_id))
+
         cursor.execute("UPDATE vaults SET vault_epoch = vault_epoch + 1 WHERE vault_id = ?", (vid,))
         conn.commit()
 
-    return {"status": "SUCCESS", "message": "Grants assigned", "grants_created": grants_created}
+    if last_gid:
+        audit_service.log_event(
+            request_id=f"assign_{last_gid}",
+            actor_id=principal.user_id,
+            action="assign_grant",
+            object_type="resource" if body.resource_id else "vault",
+            object_id=body.resource_id or vid,
+            decision="ALLOW",
+            policy_version=1,
+            reason_code="RESOURCE_ASSIGNED" if body.resource_id else "FOLDER_ASSIGNED"
+        )
 
-    audit_service.log_event(
-        request_id=f"assign_{gid}",
-        actor_id=principal.user_id,
-        action="assign_grant",
-        object_type="vault",
-        object_id=vid,
-        decision="ALLOW",
-        policy_version=1,
-        reason_code="FOLDER_ASSIGNED"
-    )
-
-    return {"status": "ASSIGNED", "grant_id": gid, "grantee": grantee_formatted, "valid_until": valid_until}
+    return {
+        "status": "SUCCESS",
+        "message": f"Assigned access to {'specific file' if body.resource_id else 'folder'}",
+        "grants_created": grants_created,
+        "resource_id": body.resource_id
+    }
 
 @app.get("/api/vaults/{vault_slug_or_id}/members")
 def get_vault_members(vault_slug_or_id: str, principal: Principal = Depends(get_current_principal)):
@@ -715,19 +957,31 @@ def get_vault_members(vault_slug_or_id: str, principal: Principal = Depends(get_
 
         vid = vault["vault_id"]
         cursor.execute("""
-            SELECT g.grant_id, g.grantee_type, g.grantee_id, g.actions, g.valid_from, g.valid_until, g.state,
+            SELECT g.grant_id, g.vault_id, g.grantee_type, g.grantee_id, g.selector, g.actions,
+                   g.valid_from, g.valid_until, g.state, g.issuer_id, g.created_at, g.delegable,
                    u.username, u.department, u.clearance
             FROM grants g
-            LEFT JOIN users u ON g.grantee_id = 'user:' || u.user_id
+            LEFT JOIN users u ON (g.grantee_id = 'user:' || u.user_id OR g.grantee_id = u.user_id)
             WHERE g.vault_id = ? AND g.state = 'active'
+            ORDER BY g.created_at DESC
         """, (vid,))
         rows = cursor.fetchall()
         members = []
         for r in rows:
             m = dict(r)
-            m["actions"] = json.loads(r["actions"]) if isinstance(r["actions"], str) else r["actions"]
+            m["actions"] = json.loads(r["actions"]) if isinstance(r["actions"], str) else (r["actions"] or [])
+            sel = json.loads(r["selector"]) if isinstance(r["selector"], str) else (r["selector"] or {})
+            m["selector"] = sel
+            res_id = sel.get("resource_id") if isinstance(sel, dict) else None
+            m["resource_id"] = res_id
+            if res_id:
+                cursor.execute("SELECT title FROM resources WHERE resource_id = ?", (res_id,))
+                res_row = cursor.fetchone()
+                m["resource_title"] = res_row["title"] if res_row else res_id
+            else:
+                m["resource_title"] = None
             members.append(m)
-        return {"vault_id": vid, "members": members}
+        return {"vault_id": vid, "vault_name": vault["display_name"], "members": members}
 
 @app.delete("/api/documents/{resource_id}")
 @app.delete("/api/resources/{resource_id}")
@@ -742,28 +996,253 @@ def delete_document(resource_id: str, principal: Principal = Depends(get_current
     ingestion_pipeline.delete_resource(resource_id)
     return {"status": "DELETED", "resource_id": resource_id}
 
+@app.get("/api/chunks")
+def list_chunks(
+    vault_slug: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    modality: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    principal: Principal = Depends(get_current_principal)
+):
+    """
+    Returns authorized chunks across vaults with live cryptographic verification,
+    decrypted canonical plaintext, and multimodal metadata.
+    """
+    now = time_authority.now()
+    usable = PolicyEngine.usable_grants(principal, now.timestamp)
+    usable_vault_ids = {g.vault_id for g in usable}
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+
+        # 1. Determine accessible vaults for principal
+        if is_admin:
+            cursor.execute("SELECT vault_id, slug, display_name FROM vaults WHERE tenant_id = ? AND status = 'active'", (principal.tenant_id,))
+        else:
+            if usable_vault_ids:
+                placeholders = ",".join(["?"] * len(usable_vault_ids))
+                cursor.execute(f"""
+                    SELECT vault_id, slug, display_name FROM vaults 
+                    WHERE tenant_id = ? AND status = 'active' AND (owner_id = ? OR vault_id IN ({placeholders}))
+                """, (principal.tenant_id, principal.user_id, *usable_vault_ids))
+            else:
+                cursor.execute("""
+                    SELECT vault_id, slug, display_name FROM vaults 
+                    WHERE tenant_id = ? AND status = 'active' AND owner_id = ?
+                """, (principal.tenant_id, principal.user_id))
+        
+        accessible_vaults = cursor.fetchall()
+        accessible_vault_map = {v["vault_id"]: dict(v) for v in accessible_vaults}
+        accessible_vault_ids = list(accessible_vault_map.keys())
+
+        if not accessible_vault_ids:
+            return {
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "chunks": [],
+                "stats": {"total_chunks": 0, "total_encrypted": 0, "modalities": {}}
+            }
+
+        target_vault_id = None
+        if vault_slug:
+            for v_id, v in accessible_vault_map.items():
+                if v["slug"] == vault_slug:
+                    target_vault_id = v_id
+                    break
+            if not target_vault_id:
+                raise HTTPException(status_code=403, detail="Vault not accessible or not found.")
+
+        # 2. Build filter clauses
+        where_clauses = []
+        params = []
+
+        if target_vault_id:
+            where_clauses.append("c.vault_id = ?")
+            params.append(target_vault_id)
+        else:
+            v_placeholders = ",".join(["?"] * len(accessible_vault_ids))
+            where_clauses.append(f"c.vault_id IN ({v_placeholders})")
+            params.extend(accessible_vault_ids)
+
+        if not is_admin:
+            where_clauses.append("c.classification <= ?")
+            params.append(principal.clearance)
+
+        if resource_id:
+            where_clauses.append("c.resource_id = ?")
+            params.append(resource_id)
+
+        if modality and modality.lower() != "all":
+            mod_clean = modality.lower()
+            if mod_clean == "image":
+                where_clauses.append("(r.resource_type = 'IMAGE' OR c.provenance LIKE '%\"modality\": \"image\"%')")
+            elif mod_clean == "audio":
+                where_clauses.append("(r.resource_type = 'AUDIO' OR c.provenance LIKE '%\"modality\": \"audio\"%')")
+            elif mod_clean == "video":
+                where_clauses.append("(r.resource_type = 'VIDEO' OR c.provenance LIKE '%\"modality\": \"video\"%' OR c.provenance LIKE '%\"modality\": \"video_audio\"%')")
+            elif mod_clean == "code":
+                where_clauses.append("(r.resource_type = 'CODE' OR c.provenance LIKE '%\"modality\": \"code\"%')")
+            elif mod_clean in ("document", "doc"):
+                where_clauses.append("(r.resource_type IN ('PDF', 'DOCX', 'TEXT') OR c.provenance LIKE '%\"modality\": \"document\"%')")
+
+        if search and search.strip():
+            s_param = f"%{search.strip()}%"
+            where_clauses.append("(c.content LIKE ? OR r.title LIKE ? OR c.chunk_id LIKE ? OR c.provenance LIKE ?)")
+            params.extend([s_param, s_param, s_param, s_param])
+
+        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+
+        # Count total matching chunks
+        count_sql = f"""
+            SELECT COUNT(*) as total_count 
+            FROM chunks c
+            JOIN resources r ON c.resource_id = r.resource_id
+            WHERE {where_sql}
+        """
+        cursor.execute(count_sql, params)
+        total_count = cursor.fetchone()["total_count"]
+
+        # Fetch page rows
+        query_sql = f"""
+            SELECT c.chunk_id, c.resource_id, c.vault_id, c.chunk_index, c.content,
+                   c.classification, c.min_clearance, c.acl_selector, c.deny_selector,
+                   c.provenance, c.content_hash, c.storage_path, c.created_at,
+                   r.title as resource_title, r.resource_type, r.status as resource_status
+            FROM chunks c
+            JOIN resources r ON c.resource_id = r.resource_id
+            WHERE {where_sql}
+            ORDER BY c.created_at DESC, c.chunk_index ASC
+            LIMIT ? OFFSET ?
+        """
+        cursor.execute(query_sql, [*params, limit, offset])
+        rows = cursor.fetchall()
+
+        kek_cache = {}
+        result_chunks = []
+        encrypted_count = 0
+
+        for row in rows:
+            v_id = row["vault_id"]
+            if v_id not in kek_cache:
+                kek_cache[v_id] = derive_vault_kek(v_id)
+            vault_kek = kek_cache[v_id]
+            v_info = accessible_vault_map.get(v_id, {})
+
+            storage_path_str = row["storage_path"]
+            canonical_text = row["content"]
+            is_encrypted_file = False
+
+            if storage_path_str and Path(storage_path_str).exists():
+                try:
+                    decrypted_bytes = decrypt_from_file(Path(storage_path_str), vault_kek)
+                    canonical_text = decrypted_bytes.decode("utf-8", errors="replace")
+                    is_encrypted_file = True
+                    encrypted_count += 1
+                except Exception:
+                    pass
+
+            comp_hash = compute_content_hash(canonical_text.encode("utf-8"))
+            integrity_ok = (comp_hash == row["content_hash"])
+
+            prov_dict = {}
+            if row["provenance"]:
+                try:
+                    prov_dict = json.loads(row["provenance"]) if isinstance(row["provenance"], str) else row["provenance"]
+                except Exception:
+                    prov_dict = {}
+
+            clean_mod = prov_dict.get("modality")
+            if not clean_mod:
+                res_type_lower = (row["resource_type"] or "").lower()
+                if res_type_lower in ("pdf", "docx", "text"):
+                    clean_mod = "document"
+                elif res_type_lower in ("image", "audio", "video", "code"):
+                    clean_mod = res_type_lower
+                else:
+                    clean_mod = "document"
+            if clean_mod == "video_audio":
+                clean_mod = "video"
+
+            result_chunks.append({
+                "chunk_id": row["chunk_id"],
+                "resource_id": row["resource_id"],
+                "resource_title": row["resource_title"],
+                "resource_type": row["resource_type"],
+                "vault_id": v_id,
+                "vault_slug": v_info.get("slug", ""),
+                "vault_name": v_info.get("display_name", ""),
+                "chunk_index": row["chunk_index"],
+                "content": canonical_text,
+                "content_hash": row["content_hash"],
+                "classification": row["classification"],
+                "min_clearance": row["min_clearance"],
+                "is_encrypted": is_encrypted_file,
+                "integrity_verified": integrity_ok,
+                "modality": clean_mod,
+                "locator": prov_dict.get("locator", f"Section {row['chunk_index']}"),
+                "media_url": prov_dict.get("media_url"),
+                "timestamp": prov_dict.get("timestamp"),
+                "page": prov_dict.get("page"),
+                "created_at": row["created_at"],
+            })
+
+        # Calculate modality counts across accessible vaults
+        stats_placeholders = ",".join(["?"] * len(accessible_vault_ids))
+        cursor.execute(f"""
+            SELECT r.resource_type, COUNT(*) as c
+            FROM chunks c
+            JOIN resources r ON c.resource_id = r.resource_id
+            WHERE c.vault_id IN ({stats_placeholders})
+            GROUP BY r.resource_type
+        """, accessible_vault_ids)
+        stats_rows = cursor.fetchall()
+        mod_counts = {r["resource_type"].lower(): r["c"] for r in stats_rows}
+
+        return {
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+            "chunks": result_chunks,
+            "stats": {
+                "total_chunks": total_count,
+                "total_encrypted": encrypted_count,
+                "modalities": mod_counts
+            }
+        }
+
 @app.get("/api/users")
 def list_system_users(principal: Principal = Depends(get_current_principal)):
     is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
     with db.get_connection() as conn:
         cursor = conn.cursor()
+        # Admin can view all system users. Authenticated users within a tenant can view active users
+        # in their tenant (or all active if DEMO_MODE or single tenant) to enable folder/file sharing and collaboration.
         if is_admin:
-            cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users")
+            cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users ORDER BY username ASC")
+        elif DEMO_MODE or not principal.tenant_id or principal.tenant_id == "default_tenant":
+            cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users WHERE is_active = 1 ORDER BY username ASC")
         else:
-            cursor.execute("SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users WHERE user_id = ?", (principal.user_id,))
+            cursor.execute(
+                "SELECT user_id, username, department, clearance as clearance_level, is_active, created_at FROM users WHERE is_active = 1 AND tenant_id = ? ORDER BY username ASC",
+                (principal.tenant_id,)
+            )
         user_rows = cursor.fetchall()
         
         users_list = []
         for u in user_rows:
             u_dict = dict(u)
             cursor.execute("""
-                SELECT r.name 
+                SELECT DISTINCT r.name 
                 FROM role_assignments ra
                 JOIN roles r ON ra.role_id = r.role_id
                 WHERE ra.user_id = ?
             """, (u["user_id"],))
             r_rows = cursor.fetchall()
-            u_dict["roles"] = [r["name"] for r in r_rows] if r_rows else ["viewer"]
+            u_dict["roles"] = list(dict.fromkeys([r["name"] for r in r_rows])) if r_rows else ["viewer"]
             users_list.append(u_dict)
             
         return {"users": users_list}
@@ -965,11 +1444,24 @@ def query_rag(
         resource_id=req.resource_id
     )
 
-    # 4. Gate A: Contextual Query Expansion & Execute Vector Search
+    # 4. Gate A: Contextual Query Expansion & Adaptive Retrieval Mode (LOW, MEDIUM, HIGH)
     search_query = req.query
     if req.history:
         search_query = local_llm.contextualize_query(req.query, req.history)
-    candidate_tuples = vector_store.search(search_query, compiled_filter, top_k=10)
+
+    retrieval_mode = (req.retrieval_mode or "LOW").upper()
+    if retrieval_mode not in ("LOW", "MEDIUM", "HIGH"):
+        retrieval_mode = "LOW"
+
+    candidate_tuples = retrieval_pipeline.retrieve(
+        mode=retrieval_mode,
+        query=search_query,
+        compiled_filter=compiled_filter,
+        vault=vault,
+        principal=principal,
+        top_k=10,
+        resource_id=req.resource_id
+    )
     gate_a_count = len(candidate_tuples)
 
     # 5. Gate B: Canonical Gate - Authoritative recheck & decryption from canonical store (§21)
@@ -1040,6 +1532,7 @@ def query_rag(
         role=principal.roles[0] if principal.roles else "viewer",
         vault_slug=vault.slug,
         policy_epoch=lease.policy_epoch,
+        retrieval_mode=retrieval_mode,
         vector_filter_applied=compiled_filter.to_dict(),
         gate_a_candidates_count=gate_a_count,
         gate_b_canonical_verified_count=len(authorized_evidence),
@@ -1057,6 +1550,7 @@ def query_rag(
     return QueryResponse(
         query=req.query,
         vault_slug=vault.slug,
+        retrieval_mode=retrieval_mode,
         answer=answer_text,
         claims=claims,
         citations=updated_citations,
@@ -1458,3 +1952,22 @@ def run_security_tests(principal: Principal = Depends(get_current_principal)):
             "failed": sum(1 for r in r_list if not r.get("passed")),
             "error": str(e)
         }
+
+# ----------------- MULTI-MODAL MODEL MANAGER ENDPOINTS -----------------
+@app.get("/api/models/status")
+def get_model_status():
+    """Returns local offline multimodal models status and single-model RAM protection state."""
+    return local_model_manager.get_system_status()
+
+@app.post("/api/models/unload")
+def unload_all_models(principal: Principal = Depends(get_current_principal)):
+    """Forcefully evicts all models from RAM to ensure 0 background memory footprint."""
+    local_model_manager.unload_all_ollama_models()
+    import gc
+    gc.collect()
+    return {"status": "SUCCESS", "message": "All models purged from working memory. System on rest."}
+
+@app.get("/api/models/detect")
+def detect_model_for_file(filename: str):
+    """Auto-detects the optimal offline model and modality based on file extension."""
+    return local_model_manager.detect_model_by_filename(filename)

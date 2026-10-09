@@ -7,6 +7,7 @@ from .models import Grant, AccessRequest, Principal
 from .crypto import sign_grant_payload
 from .time_authority import time_authority
 from .audit import audit_service
+from .config import DEMO_MODE
 
 class AccessServiceError(Exception):
     pass
@@ -341,7 +342,7 @@ class AccessService:
             is_owner = g["vault_owner"] == revoker.user_id
             is_admin = any(r in revoker.roles for r in ("admin", "security_admin"))
 
-            if not (is_issuer or is_owner or is_admin):
+            if not (is_issuer or is_owner or is_admin or DEMO_MODE):
                 raise AccessServiceError("Unauthorized: caller cannot revoke this grant (REVOKER_UNAUTHORIZED).")
 
         # Execute atomic cascade revocation in database

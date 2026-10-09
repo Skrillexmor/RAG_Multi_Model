@@ -11,6 +11,8 @@ import {
   Cpu,
   LogIn,
   UserPlus,
+  LogOut,
+  RefreshCw,
 } from "lucide-react"
 import { useApp } from "../../context/AppContext"
 import { DEMO_PERSONAS } from "../../lib/personas"
@@ -41,16 +43,74 @@ export const TopBar: React.FC = () => {
     llmStatus,
     setIsLlmModalOpen,
     setIsAuthModalOpen,
+    selectedTargetFile,
+    sessionRemainingSeconds,
+    isSessionWarning,
+    renewSession,
+    logout,
   } = useApp()
 
-  // Format lease seconds
-  const formatLease = (sec: number) => {
+  // Format seconds into MM:SS
+  const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60)
     const s = sec % 60
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`
   }
 
-  const isLeaseExpiring = leaseSecondsRemaining < 60
+  // Dynamic live model auto-detection based on selected file extension
+  const getActiveModelInfo = () => {
+    if (!selectedTargetFile?.name) {
+      return {
+        badge: "💬 Gemma 3 4B",
+        title: "Gemma 3 4B (Neural LLM)",
+        modality: "Neural LLM",
+        colorClass: "bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20",
+        dotClass: "bg-blue-400",
+        tag: "LLM Active",
+      }
+    }
+    const ext = selectedTargetFile.name.split(".").pop()?.toLowerCase() || ""
+    if (["mp3", "wav", "m4a", "ogg", "flac", "aac"].includes(ext)) {
+      return {
+        badge: "🎙️ Whisper Base",
+        title: "Whisper Base (Speech-to-Text)",
+        modality: "Audio STT",
+        colorClass: "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20",
+        dotClass: "bg-amber-400 animate-pulse",
+        tag: "Whisper Active",
+      }
+    }
+    if (["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext)) {
+      return {
+        badge: "👁️ Qwen 2.5-VL",
+        title: "Qwen 2.5-VL 3B (Multimodal Vision)",
+        modality: "Vision AI",
+        colorClass: "bg-purple-500/10 border-purple-500/30 text-purple-300 hover:bg-purple-500/20",
+        dotClass: "bg-purple-400 animate-pulse",
+        tag: "Qwen-VL Active",
+      }
+    }
+    if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) {
+      return {
+        badge: "🎬 Whisper + Qwen-VL",
+        title: "Whisper + Qwen-VL (Video Multimodal)",
+        modality: "Video AI",
+        colorClass: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20",
+        dotClass: "bg-cyan-400 animate-pulse",
+        tag: "Video AI Active",
+      }
+    }
+    return {
+      badge: "💬 Gemma 3 4B",
+      title: "Gemma 3 4B (Document Synthesis)",
+      modality: "Document LLM",
+      colorClass: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20",
+      dotClass: "bg-emerald-400",
+      tag: "LLM Active",
+    }
+  }
+
+  const liveModel = getActiveModelInfo()
 
   return (
     <header className="h-14 border-b border-border bg-surface-raised/80 backdrop-blur-md px-4 flex items-center justify-between select-none z-30 shrink-0">
@@ -99,70 +159,79 @@ export const TopBar: React.FC = () => {
       </div>
 
       {/* Center: Command Palette Trigger */}
-      <div className="flex-1 max-w-md mx-4 hidden md:block">
+      <div className="flex-1 max-w-sm mx-auto hidden lg:block">
         <button
+          type="button"
           onClick={() => setCommandPaletteOpen(true)}
-          className="w-full h-8 px-3 rounded-md bg-surface-subtle border border-border/80 text-muted-foreground text-xs flex items-center justify-between hover:border-border hover:text-foreground transition-all"
+          className="w-full h-8 px-3 rounded-lg bg-surface-subtle/80 border border-border/70 text-muted-foreground text-xs flex items-center justify-between hover:border-emerald-500/40 hover:bg-surface-raised transition-all shadow-xs"
         >
-          <span className="flex items-center gap-2">
-            <Search className="h-3.5 w-3.5 text-muted-foreground" />
-            <span>Search All</span>
+          <span className="flex items-center gap-2 truncate">
+            <Search className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+            <span className="truncate">Search all documents, vaults, chunks...</span>
           </span>
-          <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded bg-secondary px-1.5 font-mono text-[10px] text-muted-foreground">
-            <span className="text-xs">⌘</span>K
+          <kbd className="pointer-events-none inline-flex h-4.5 select-none items-center gap-0.5 rounded bg-secondary/80 border border-border/50 px-1.5 font-mono text-[10px] text-muted-foreground shrink-0 ml-2">
+            <span>⌘</span>K
           </kbd>
         </button>
       </div>
 
       {/* Right: Security & Network Telemetry + Persona */}
-      <div className="flex items-center gap-2">
-        {/* Local Offline LLM Status Chip */}
+      <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        {/* Dynamic Multi-Modal Live Model Indicator */}
         <button
           type="button"
           onClick={() => setIsLlmModalOpen(true)}
-          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors cursor-pointer ${
-            llmStatus?.connected
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20"
-              : "bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20"
-          }`}
-          title="Click to view Local LLM status, setup guide, and model commands"
+          className={`flex items-center gap-1.5 px-2.5 py-1 h-8 rounded-lg border text-xs font-medium transition-all cursor-pointer whitespace-nowrap shadow-xs ${liveModel.colorClass}`}
+          title={`Active Model: ${liveModel.title} · RAM Guard: Single-Model Active (Click to inspect)`}
         >
-          <Cpu className="h-3 w-3" />
-          <span>
-            {llmStatus?.connected ? `Ollama (${llmStatus.active_model})` : "Local LLM: Safe Extractive"}
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${liveModel.dotClass}`} />
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${liveModel.dotClass}`} />
+          </span>
+          <span className="font-semibold tracking-tight">{liveModel.badge}</span>
+          <span className="text-[10px] opacity-75 font-mono hidden md:inline px-1 py-0 rounded bg-background/40">
+            {liveModel.modality}
           </span>
         </button>
 
         {/* Offline LAN Telemetry */}
         <div
-          className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-surface-subtle border border-border text-[11px] text-muted-foreground"
-          title="Air-gapped local area network: zero cloud connectivity"
+          className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 h-8 rounded-lg bg-surface-subtle border border-border/70 text-xs text-muted-foreground whitespace-nowrap"
+          title="Air-gapped local area network: zero external cloud connectivity"
         >
-          <Wifi className="h-3 w-3 text-emerald-400" />
-          <span className="font-medium text-foreground">LAN Native</span>
+          <Wifi className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+          <span className="font-medium text-foreground text-[11px]">LAN</span>
         </div>
 
         {/* Time Authority Telemetry */}
         <div
-          className="hidden xl:flex items-center gap-1.5 px-2 py-1 rounded-md bg-surface-subtle border border-border text-[11px] text-muted-foreground"
+          className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1 h-8 rounded-lg bg-surface-subtle border border-border/70 text-xs text-muted-foreground whitespace-nowrap"
           title="Cryptographic trusted time authority (§18)"
         >
-          <Clock className="h-3 w-3 text-muted-foreground" />
-          <span>Clock {timeStatus?.status === "OK" ? "Verified" : "Skewed"}</span>
+          <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <span className="text-[11px]">Time: {timeStatus?.status === "OK" ? "Verified" : "Syncing"}</span>
         </div>
 
-        {/* Authorization Lease Indicator */}
-        <div
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-mono transition-colors ${
-            isLeaseExpiring
-              ? "bg-rose-950/40 border-rose-800/60 text-rose-300 animate-pulse"
-              : "bg-surface-subtle border-border text-foreground"
+        {/* Authoritative Session Inactivity Countdown Capsule */}
+        <button
+          type="button"
+          onClick={renewSession}
+          className={`group flex items-center gap-1.5 px-2.5 py-1 h-8 rounded-lg border text-xs font-mono transition-all cursor-pointer whitespace-nowrap ${
+            isSessionWarning
+              ? "bg-amber-950/80 border-amber-500 text-amber-200 animate-pulse shadow-sm shadow-amber-500/30"
+              : "bg-surface-subtle border-border/80 text-foreground hover:border-emerald-500/50 hover:bg-secondary/70 shadow-xs"
           }`}
-          title="Active authorization lease TTL: token auto-expires when counter reaches zero"
+          title="Authoritative 5-minute inactivity session. Resets on mouse, keyboard, or scroll. Click to extend."
         >
-          <Lock className="h-3 w-3 text-emerald-400" />
-          <span>{formatLease(leaseSecondsRemaining)}</span>
-        </div>
+          <Clock className={`h-3.5 w-3.5 shrink-0 ${isSessionWarning ? "text-amber-400" : "text-emerald-400"}`} />
+          <span className="text-muted-foreground text-[11px] hidden sm:inline">Session:</span>
+          <span className="font-semibold tracking-tight">{formatTime(sessionRemainingSeconds)}</span>
+          <RefreshCw className="h-3 w-3 text-muted-foreground/60 group-hover:text-emerald-400 group-hover:rotate-180 transition-all ml-0.5" />
+        </button>
+
+
+        {/* Divider */}
+        <div className="h-4 w-px bg-border/60 mx-0.5 hidden xs:block" />
 
         {/* Persona Dropdown */}
         <DropdownMenu>
@@ -209,6 +278,14 @@ export const TopBar: React.FC = () => {
             >
               <Cpu className="h-3.5 w-3.5 text-emerald-400" />
               <span>Local LLM Setup & Models</span>
+            </DropdownMenuItem>
+
+            <DropdownMenuItem
+              onClick={logout}
+              className="flex items-center gap-2 py-1.5 text-xs cursor-pointer text-rose-400 hover:text-rose-300 hover:bg-rose-950/20"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span>Sign Out (Revoke Session)</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />

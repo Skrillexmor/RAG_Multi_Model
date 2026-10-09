@@ -8,6 +8,7 @@ import {
   Network,
   History,
   ShieldAlert,
+  Database,
   Settings,
   Pin,
   Trash2,
@@ -215,7 +216,7 @@ export const Sidebar: React.FC = () => {
     { id: "access", label: "Access & Grants", icon: KeyRound, category: "SECURITY" },
     { id: "federation", label: "LAN Federation", icon: Network, category: "SECURITY" },
     { id: "audit", label: "Audit Trail", icon: History, category: "SECURITY" },
-    { id: "tests", label: "Security Tests", icon: ShieldAlert, category: "SECURITY", badge: "84 PASS" },
+    { id: "chunks", label: "Chunk Store", icon: Database, category: "SECURITY", badge: "Live" },
     { id: "settings", label: "Settings", icon: Settings, category: "SYSTEM" },
   ]
 

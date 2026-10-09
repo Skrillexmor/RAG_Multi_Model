@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react"
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import { toast } from "sonner"
 import {
   Principal,
@@ -28,6 +28,7 @@ export type AppView =
   | "federation"
   | "audit"
   | "tests"
+  | "chunks"
   | "settings"
 
 interface AppContextType {
@@ -71,6 +72,12 @@ interface AppContextType {
   timeStatus: TimeStatus | null
   refreshSystemStatus: () => Promise<void>
 
+  // Session & Inactivity Management
+  sessionRemainingSeconds: number
+  isSessionWarning: boolean
+  renewSession: () => Promise<void>
+  logout: () => Promise<void>
+
   // Inspector & Drawers
   activeInspector: ActiveInspector
   openEvidenceInspector: (evidence: EvidenceItem) => void
@@ -105,6 +112,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leaseSecondsRemaining, setLeaseSecondsRemaining] = useState<number>(300)
   const [timeStatus, setTimeStatus] = useState<TimeStatus | null>(null)
 
+  // Inactivity timeout state (Authoritative 300s)
+  const [sessionRemainingSeconds, setSessionRemainingSeconds] = useState<number>(300)
+  const isSessionWarning = sessionRemainingSeconds <= 30 && sessionRemainingSeconds > 0 && principal !== null
+
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false)
   const [isLlmModalOpen, setIsLlmModalOpen] = useState<boolean>(false)
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null)
@@ -123,14 +134,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // First try login
       const loginRes = await api.login(targetPersona.username, `${targetPersona.username}123`)
       setPrincipal(loginRes.principal)
-      // Set initial lease
+      // Set initial lease and inactivity timeout
       setLeaseSecondsRemaining(300)
+      setSessionRemainingSeconds(300)
     } catch (err: any) {
       console.warn("Auto-login error:", err)
       // Demo fallback switch
       try {
         const switchRes = await api.switchPersona(targetPersona.username)
         setPrincipal(switchRes.principal)
+        setSessionRemainingSeconds(300)
       } catch (e: any) {
         setPrincipal({
           user_id: "u_alice",
@@ -140,6 +153,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           tenant_id: "tenant-default",
           is_active: true,
         })
+        setSessionRemainingSeconds(300)
       }
     } finally {
       setIsLoadingUser(false)
@@ -183,6 +197,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Reset sensitive context (§54)
         setActiveInspector(null)
         setLeaseSecondsRemaining(300)
+        setSessionRemainingSeconds(300)
 
         // Reload vaults for new user
         const vRes = await api.getVaults()
@@ -241,6 +256,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
       }
       setLeaseSecondsRemaining(300)
+      setSessionRemainingSeconds(300)
       setActiveInspector(null)
       const vRes = await api.getVaults()
       setVaults(vRes.vaults || [])
@@ -277,6 +293,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         accessibleVaults: []
       })
       setLeaseSecondsRemaining(300)
+      setSessionRemainingSeconds(300)
       setActiveInspector(null)
       const vRes = await api.getVaults()
       setVaults(vRes.vaults || [])
@@ -307,7 +324,181 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     })
   }, [])
 
-  // 6. Lease countdown ticker
+  // 8. Session & Inactivity Management (§300s Authoritative Inactivity)
+  const lastActivityReportRef = useRef<number>(Date.now())
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
+
+  const logout = useCallback(async () => {
+    try {
+      await api.logout()
+    } catch {
+      // ignore
+    }
+    api.setToken(null)
+    setPrincipal(null)
+    setActiveInspector(null)
+    setIsAuthModalOpen(true)
+    if (broadcastChannelRef.current) {
+      try {
+        broadcastChannelRef.current.postMessage({ type: "LOGOUT" })
+      } catch {}
+    }
+    toast.info("Signed out of session")
+  }, [])
+
+  const renewSession = useCallback(async () => {
+    try {
+      const res = await api.renewSession()
+      setSessionRemainingSeconds(res.remaining_seconds || 300)
+      if (broadcastChannelRef.current) {
+        try {
+          broadcastChannelRef.current.postMessage({ type: "RENEWED", remainingSeconds: res.remaining_seconds || 300 })
+        } catch {}
+      }
+      toast.success("Session extended for 5 minutes")
+    } catch (err: any) {
+      console.warn("Session renewal fallback:", err)
+      setSessionRemainingSeconds(300)
+      toast.info("Session refreshed")
+    }
+  }, [])
+
+  // Genuine User Activity Tracker (Keyboard, Pointer, Touch, Scroll, Wheel)
+  const handleUserActivity = useCallback(() => {
+    if (!principal) return
+    setSessionRemainingSeconds(300)
+
+    const now = Date.now()
+    // Throttle server activity pings to at most once every 15 seconds
+    if (now - lastActivityReportRef.current > 15000) {
+      lastActivityReportRef.current = now
+      api.recordActivity().catch(() => {})
+      if (broadcastChannelRef.current) {
+        try {
+          broadcastChannelRef.current.postMessage({ type: "ACTIVITY", remainingSeconds: 300 })
+        } catch {}
+      }
+    }
+  }, [principal])
+
+  useEffect(() => {
+    if (!principal) return
+
+    const onEvent = () => handleUserActivity()
+    const captureOpts: AddEventListenerOptions = { capture: true, passive: true }
+    const passiveOpts: AddEventListenerOptions = { passive: true }
+
+    // Use capture: true so scroll anywhere in child containers bubbles up
+    window.addEventListener("scroll", onEvent, captureOpts)
+    document.addEventListener("scroll", onEvent, captureOpts)
+    window.addEventListener("wheel", onEvent, passiveOpts)
+    window.addEventListener("keydown", onEvent, passiveOpts)
+    window.addEventListener("pointerdown", onEvent, passiveOpts)
+    window.addEventListener("touchstart", onEvent, passiveOpts)
+    window.addEventListener("touchmove", onEvent, passiveOpts)
+
+    return () => {
+      window.removeEventListener("scroll", onEvent, captureOpts)
+      document.removeEventListener("scroll", onEvent, captureOpts)
+      window.removeEventListener("wheel", onEvent, passiveOpts)
+      window.removeEventListener("keydown", onEvent, passiveOpts)
+      window.removeEventListener("pointerdown", onEvent, passiveOpts)
+      window.removeEventListener("touchstart", onEvent, passiveOpts)
+      window.removeEventListener("touchmove", onEvent, passiveOpts)
+    }
+  }, [principal, handleUserActivity])
+
+  // Cross-tab Synchronization via BroadcastChannel & storage events
+  useEffect(() => {
+    let bc: BroadcastChannel | null = null
+    try {
+      bc = new BroadcastChannel("rag_session_channel")
+      broadcastChannelRef.current = bc
+      bc.onmessage = (event) => {
+        const data = event.data
+        if (data?.type === "LOGOUT" || data?.type === "EXPIRED") {
+          api.setToken(null)
+          setPrincipal(null)
+          setActiveInspector(null)
+          setIsAuthModalOpen(true)
+        } else if (data?.type === "ACTIVITY" || data?.type === "RENEWED") {
+          setSessionRemainingSeconds(data.remainingSeconds || 300)
+        }
+      }
+    } catch (e) {
+      console.warn("BroadcastChannel not supported", e)
+    }
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "rag_token" && !e.newValue) {
+        setPrincipal(null)
+        setActiveInspector(null)
+        setIsAuthModalOpen(true)
+      }
+    }
+    window.addEventListener("storage", onStorage)
+
+    return () => {
+      window.removeEventListener("storage", onStorage)
+      if (bc) bc.close()
+    }
+  }, [])
+
+  // Inactivity countdown ticker & periodic background sync
+  useEffect(() => {
+    if (!principal) return
+
+    const timer = setInterval(() => {
+      setSessionRemainingSeconds((prev) => {
+        if (prev <= 1) {
+          api.setToken(null)
+          setPrincipal(null)
+          setActiveInspector(null)
+          setIsAuthModalOpen(true)
+          if (broadcastChannelRef.current) {
+            try {
+              broadcastChannelRef.current.postMessage({ type: "EXPIRED" })
+            } catch {}
+          }
+          toast.error("Session expired due to 5 minutes of inactivity. Please sign in again.")
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    // Periodic authoritative server status reconciliation (read-only; does not keep session alive)
+    const syncTimer = setInterval(async () => {
+      try {
+        const status = await api.getSessionStatus()
+        // Only force logout if the server authoritative check explicitly reports expired or revoked
+        if (status && status.active === false && (status.reason === "INACTIVITY_EXPIRED" || status.reason === "SESSION_REVOKED")) {
+          api.setToken(null)
+          setPrincipal(null)
+          setActiveInspector(null)
+          setIsAuthModalOpen(true)
+          if (broadcastChannelRef.current) {
+            try {
+              broadcastChannelRef.current.postMessage({ type: "EXPIRED" })
+            } catch {}
+          }
+          toast.error("Session expired due to 5 minutes of inactivity. Please sign in again.")
+        } else if (typeof status?.remaining_seconds === "number" && status.remaining_seconds > 0) {
+          setSessionRemainingSeconds(status.remaining_seconds)
+        }
+      } catch (err: any) {
+        // Do not force logout on network glitch or transient server restart
+        console.warn("Session status check deferred:", err)
+      }
+    }, 20000)
+
+    return () => {
+      clearInterval(timer)
+      clearInterval(syncTimer)
+    }
+  }, [principal])
+
+  // Lease countdown ticker (Point-in-time retrieval authorization lease)
   useEffect(() => {
     const timer = setInterval(() => {
       setLeaseSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0))
@@ -431,6 +622,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         leaseSecondsRemaining,
         timeStatus,
         refreshSystemStatus,
+        sessionRemainingSeconds,
+        isSessionWarning,
+        renewSession,
+        logout,
         activeInspector,
         openEvidenceInspector,
         openTraceInspector,

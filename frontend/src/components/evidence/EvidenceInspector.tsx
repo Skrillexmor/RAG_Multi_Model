@@ -129,7 +129,7 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
                   <span>Visual Evidence Source</span>
                 </span>
                 <span className="text-[10px] text-muted-foreground font-mono">
-                  Gemma 3 Vision + EasyOCR
+                  Qwen 2.5-VL 3B + OCR
                 </span>
               </div>
               <div className="rounded-xl overflow-hidden border border-border bg-black/40 p-2">

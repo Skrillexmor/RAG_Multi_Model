@@ -19,22 +19,28 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu"
 import { api } from "../../lib/api"
+import { RetrievalMode } from "../../types"
 
 interface ComposerProps {
   onSendMessage: (
     text: string,
     purpose?: string,
     fileId?: string,
-    fileName?: string
+    fileName?: string,
+    retrievalMode?: RetrievalMode
   ) => void
   isLoading?: boolean
   disabled?: boolean
+  retrievalMode?: RetrievalMode
+  onRetrievalModeChange?: (mode: RetrievalMode) => void
 }
 
 export const Composer: React.FC<ComposerProps> = ({
   onSendMessage,
   isLoading = false,
   disabled = false,
+  retrievalMode: controlledMode,
+  onRetrievalModeChange,
 }) => {
   const {
     vaults,
@@ -47,6 +53,15 @@ export const Composer: React.FC<ComposerProps> = ({
 
   const [input, setInput] = useState("")
   const [purpose, setPurpose] = useState("general_query")
+  const [localRetrievalMode, setLocalRetrievalMode] = useState<RetrievalMode>("LOW")
+  const activeRetrievalMode = controlledMode || localRetrievalMode
+
+  const handleModeChange = (mode: RetrievalMode) => {
+    setLocalRetrievalMode(mode)
+    if (onRetrievalModeChange) {
+      onRetrievalModeChange(mode)
+    }
+  }
   const [vaultDocs, setVaultDocs] = useState<VaultDocument[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -95,7 +110,8 @@ export const Composer: React.FC<ComposerProps> = ({
       input.trim(),
       purpose,
       selectedTargetFile?.id,
-      selectedTargetFile?.name
+      selectedTargetFile?.name,
+      activeRetrievalMode
     )
     setInput("")
     if (textareaRef.current) {
@@ -103,13 +119,84 @@ export const Composer: React.FC<ComposerProps> = ({
     }
   }
 
+  const getDetectedModel = () => {
+    if (!selectedTargetFile?.name) {
+      return {
+        badge: "💬 Gemma 3 4B",
+        name: "Gemma 3 4B",
+        label: "Neural LLM",
+        colorClass: "bg-blue-500/10 border-blue-500/30 text-blue-300",
+        dotClass: "bg-blue-400",
+      }
+    }
+    const ext = selectedTargetFile.name.split(".").pop()?.toLowerCase() || ""
+    if (["mp3", "wav", "m4a", "ogg", "flac", "aac"].includes(ext)) {
+      return {
+        badge: "🎙️ Whisper Base",
+        name: "Whisper Base",
+        label: "Speech-to-Text",
+        colorClass: "bg-amber-500/10 border-amber-500/30 text-amber-300",
+        dotClass: "bg-amber-400 animate-pulse",
+      }
+    }
+    if (["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext)) {
+      return {
+        badge: "👁️ Qwen 2.5-VL",
+        name: "Qwen 2.5-VL 3B",
+        label: "Vision AI",
+        colorClass: "bg-purple-500/10 border-purple-500/30 text-purple-300",
+        dotClass: "bg-purple-400 animate-pulse",
+      }
+    }
+    if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) {
+      return {
+        badge: "🎬 Whisper + Qwen-VL",
+        name: "Whisper + Qwen-VL",
+        label: "Video AI",
+        colorClass: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300",
+        dotClass: "bg-cyan-400 animate-pulse",
+      }
+    }
+    return {
+      badge: "💬 Gemma 3 4B",
+      name: "Gemma 3 4B",
+      label: "Document LLM",
+      colorClass: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+      dotClass: "bg-emerald-400",
+    }
+  }
+
+  const detectedEngine = getDetectedModel()
+
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pb-4">
-      <div className="relative rounded-2xl border border-border/80 bg-surface-raised shadow-xl focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all">
+      <div className="relative rounded-2xl border border-border/80 bg-surface-raised shadow-xl focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all overflow-hidden">
         {/* Loading Progress Bar */}
         {isLoading && (
-          <div className="absolute top-0 inset-x-0 h-0.5 bg-secondary overflow-hidden rounded-t-2xl">
+          <div className="absolute top-0 inset-x-0 h-0.5 bg-secondary overflow-hidden rounded-t-2xl z-10">
             <div className="w-full h-full bg-emerald-500 animate-[indeterminate_1.5s_infinite_linear]" />
+          </div>
+        )}
+
+        {/* Dynamic Model & Scope Banner */}
+        {selectedTargetFile && (
+          <div className="px-3.5 py-1.5 bg-surface-subtle/80 border-b border-border/60 flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-muted-foreground">Target:</span>
+              <span className="font-semibold text-foreground truncate max-w-[200px]">
+                {selectedTargetFile.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-muted-foreground hidden sm:inline">Engine:</span>
+              <span className={`font-semibold px-2 py-0.5 rounded border text-[10px] flex items-center gap-1 ${detectedEngine.colorClass}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${detectedEngine.dotClass}`} />
+                {detectedEngine.badge}
+              </span>
+              <span className="text-[9px] text-muted-foreground/80 font-mono hidden md:inline">
+                (Exclusive RAM)
+              </span>
+            </div>
           </div>
         )}
 
@@ -281,6 +368,49 @@ export const Composer: React.FC<ComposerProps> = ({
             <Badge variant="clearance" className="hidden sm:inline-flex text-[10px] py-0 font-mono">
               L{persona.clearanceLevel}
             </Badge>
+
+            {/* Retrieval Mode Segmented Selector (§Part 1) */}
+            <div
+              className="flex items-center rounded-lg bg-surface-subtle border border-border/70 p-0.5 text-[10px]"
+              title={`Retrieval Mode: ${activeRetrievalMode}\nLOW: Standard vector retrieval\nMEDIUM: Lazy query-aware chunking & secure caching\nHIGH: Advanced hybrid retrieval & local reranking`}
+            >
+              <button
+                type="button"
+                onClick={() => handleModeChange("LOW")}
+                className={`px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer ${
+                  activeRetrievalMode === "LOW"
+                    ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                }`}
+                title="LOW Mode: Standard Pre-indexed Vector Search (Fast, minimal compute)"
+              >
+                LOW
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange("MEDIUM")}
+                className={`px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer ${
+                  activeRetrievalMode === "MEDIUM"
+                    ? "bg-blue-500/20 text-blue-300 font-bold border border-blue-500/40 shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                }`}
+                title="MEDIUM Mode: Lazy, Query-Aware Chunking (On-demand sentence slicing & caching)"
+              >
+                MED
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange("HIGH")}
+                className={`px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer ${
+                  activeRetrievalMode === "HIGH"
+                    ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/40 shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                }`}
+                title="HIGH Mode: Advanced Query-Aware Retrieval (Intent analysis, hybrid scoring & local reranking)"
+              >
+                HIGH
+              </button>
+            </div>
           </div>
 
           {/* Right: Send Button */}
@@ -297,6 +427,21 @@ export const Composer: React.FC<ComposerProps> = ({
               <ArrowUp className="h-4 w-4" />
             </button>
           </div>
+        </div>
+
+        {/* Retrieval Mode Description & Speed/Quality Tradeoff */}
+        <div className="px-3.5 py-1 bg-surface-subtle/50 border-t border-border/30 flex items-center justify-between text-[10px] text-muted-foreground select-none">
+          <div className="flex items-center gap-1.5 truncate">
+            <span className="font-semibold text-foreground/80">Mode [{activeRetrievalMode}]:</span>
+            <span className="truncate">
+              {activeRetrievalMode === "LOW" && "Standard FastEmbed vector search from persistent index"}
+              {activeRetrievalMode === "MEDIUM" && "Lazy query-aware boundary slicing + deterministic content-hash cache"}
+              {activeRetrievalMode === "HIGH" && "Advanced intent analysis, hybrid scoring, context expansion & local reranking"}
+            </span>
+          </div>
+          <span className="font-mono text-[9px] opacity-75 shrink-0 hidden md:inline ml-2">
+            {activeRetrievalMode === "LOW" ? "Speed: High · Compute: Low" : activeRetrievalMode === "MEDIUM" ? "Speed: Medium · Precision: High" : "Speed: Balanced · Quality: Maximum"}
+          </span>
         </div>
       </div>
     </div>

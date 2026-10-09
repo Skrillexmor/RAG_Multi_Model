@@ -53,6 +53,12 @@ export const SecurityTraceDrawer: React.FC<SecurityTraceDrawerProps> = ({
               <span>RAG Scope</span>
               <span className="font-mono">{trace.vault}</span>
             </div>
+            <div className="flex items-center justify-between text-xs font-medium text-foreground">
+              <span>Retrieval Mode</span>
+              <Badge variant="outline" className="text-[10px] py-0 font-mono text-emerald-300 border-emerald-500/30 bg-emerald-500/10">
+                {trace.retrieval_mode || (trace as any).retrieval_mode || "LOW"}
+              </Badge>
+            </div>
           </div>
 
           {/* Gate A: Pre-Retrieval Vector Isolation */}
@@ -66,7 +72,10 @@ export const SecurityTraceDrawer: React.FC<SecurityTraceDrawerProps> = ({
             </div>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
               Server compiled and Ed25519-signed mandatory Qdrant payload filter.
-              Client filter overrides strictly rejected.
+              Executed via <strong>{trace.retrieval_mode || (trace as any).retrieval_mode || "LOW"}</strong> pipeline:
+              {(trace.retrieval_mode || (trace as any).retrieval_mode) === "MEDIUM" && " Lazy query-aware chunking with cryptographic content-hash cache."}
+              {(trace.retrieval_mode || (trace as any).retrieval_mode) === "HIGH" && " Hybrid lexical + vector search with local reranking and neighbor context expansion."}
+              {(!(trace.retrieval_mode || (trace as any).retrieval_mode) || (trace.retrieval_mode || (trace as any).retrieval_mode) === "LOW") && " Standard pre-indexed dense vector search."}
             </p>
             <div className="flex justify-between text-[11px] pt-1 border-t border-border/40">
               <span className="text-muted-foreground">Vector Candidates Admitted</span>

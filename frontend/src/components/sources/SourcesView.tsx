@@ -42,6 +42,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "../ui/dialog"
+import { ShareAccessModal } from "../common/ShareAccessModal"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -64,6 +65,7 @@ export const SourcesView: React.FC = () => {
   const [editingVault, setEditingVault] = useState<Vault | null>(null)
   const [deletingVault, setDeletingVault] = useState<Vault | null>(null)
   const [sharingVault, setSharingVault] = useState<Vault | null>(null)
+  const [sharingDoc, setSharingDoc] = useState<VaultDocument | null>(null)
   const [deletingDoc, setDeletingDoc] = useState<{ vaultSlug: string; doc: VaultDocument } | null>(null)
 
   // Users list for assignment
@@ -217,56 +219,9 @@ export const SourcesView: React.FC = () => {
   }
 
   // --- Open Share / Assign Modal ---
-  const handleOpenShare = async (vault: Vault) => {
+  const handleOpenShare = (vault: Vault, doc?: VaultDocument | null) => {
     setSharingVault(vault)
-    setLoadingMembers(true)
-    try {
-      const res = await api.getVaultMembers(vault.vault_id)
-      setVaultMembers(res.members || [])
-    } catch (err) {
-      setVaultMembers([])
-    } finally {
-      setLoadingMembers(false)
-    }
-  }
-
-  // --- Submit Assignment ---
-  const handleAssignAccess = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!sharingVault) return
-
-    setIsAssigning(true)
-    try {
-      const payload: any = {
-        actions: assignActions,
-        valid_hours: assignDurationHours,
-        is_delegable: assignDelegable,
-      }
-
-      if (selectedAssigneeType === "user") {
-        if (!selectedAssigneeId) {
-          toast.error("Please choose a user to assign access.")
-          setIsAssigning(false)
-          return
-        }
-        payload.user_ids = [selectedAssigneeId]
-      } else {
-        payload.role_names = [selectedRole]
-      }
-
-      const res = await api.assignVault(sharingVault.slug, payload)
-      toast.success("Access assigned successfully!", {
-        description: `Created ${res.grants_created || 1} signed cryptographic authorization grant(s).`,
-      })
-
-      // Reload members list
-      const membersRes = await api.getVaultMembers(sharingVault.vault_id)
-      setVaultMembers(membersRes.members || [])
-    } catch (err: any) {
-      toast.error(`Assignment failed: ${err.message}`)
-    } finally {
-      setIsAssigning(false)
-    }
+    setSharingDoc(doc || null)
   }
 
   // --- Delete Single Document ---
@@ -597,6 +552,17 @@ export const SourcesView: React.FC = () => {
                                   <span>Ask This File</span>
                                 </Button>
 
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => handleOpenShare(vault, doc)}
+                                  className="text-xs h-7 gap-1 px-2 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 font-medium"
+                                  title="Share access to this specific file"
+                                >
+                                  <Share2 className="h-3.5 w-3.5" />
+                                  <span>Share File</span>
+                                </Button>
+
                                 <button
                                   onClick={() =>
                                     setDeletingDoc({ vaultSlug: vault.slug, doc })
@@ -748,7 +714,7 @@ export const SourcesView: React.FC = () => {
                           />
                           <span className="font-medium text-foreground">{u.username}</span>
                           <span className="text-[10px] text-muted-foreground">
-                            ({u.roles.join(", ")})
+                            ({Array.from(new Set(u.roles)).join(", ")})
                           </span>
                         </div>
                         <Badge variant="clearance" className="text-[9px] py-0 px-1">
@@ -898,222 +864,17 @@ export const SourcesView: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* SHARE / ASSIGN ACCESS MODAL */}
-      <Dialog open={!!sharingVault} onOpenChange={(open) => !open && setSharingVault(null)}>
-        <DialogContent className="max-w-lg bg-surface-raised border-border text-foreground shadow-2xl p-6">
-          <DialogHeader className="space-y-1.5 pb-2 border-b border-border/40">
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                <Share2 className="h-4 w-4" />
-              </div>
-              <div>
-                <DialogTitle className="text-base font-semibold">
-                  Assign & Share Folder Access
-                </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Folder: <span className="font-semibold text-foreground">{sharingVault?.display_name}</span> ({sharingVault?.slug})
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-
-          {/* Members List */}
-          <div className="space-y-2 pt-1">
-            <label className="text-xs font-semibold text-foreground flex items-center justify-between">
-              <span>Active Members & Grants:</span>
-              <span className="text-[10px] text-muted-foreground font-mono">
-                {vaultMembers.length} active grant(s)
-              </span>
-            </label>
-
-            <div className="max-h-36 overflow-y-auto space-y-1.5 p-2 rounded-lg bg-surface-subtle/50 border border-border/60">
-              {loadingMembers ? (
-                <p className="text-xs text-muted-foreground text-center py-2">Loading grants...</p>
-              ) : vaultMembers.length > 0 ? (
-                vaultMembers.map((m) => (
-                  <div
-                    key={m.grant_id}
-                    className="flex items-center justify-between p-2 rounded bg-surface-raised border border-border/60 text-xs"
-                  >
-                    <div>
-                      <div className="font-medium text-foreground">{m.grantee_id}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono">
-                        {m.actions.join(", ")}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <Badge variant="success" className="text-[9px] py-0 px-1">
-                        {m.state}
-                      </Badge>
-                      <div className="text-[9px] text-muted-foreground font-mono mt-0.5">
-                        Until: {new Date(m.valid_until).toLocaleDateString()}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-muted-foreground text-center py-2">
-                  No active grants assigned yet.
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Assign New Grant Form */}
-          <form onSubmit={handleAssignAccess} className="space-y-3.5 pt-2 border-t border-border/40">
-            <div className="flex items-center gap-4 text-xs font-medium">
-              <span>Assign To:</span>
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="assigneeType"
-                  checked={selectedAssigneeType === "user"}
-                  onChange={() => setSelectedAssigneeType("user")}
-                  className="text-emerald-500"
-                />
-                <span>Individual User</span>
-              </label>
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="radio"
-                  name="assigneeType"
-                  checked={selectedAssigneeType === "role"}
-                  onChange={() => setSelectedAssigneeType("role")}
-                  className="text-emerald-500"
-                />
-                <span>System Role</span>
-              </label>
-            </div>
-
-            {selectedAssigneeType === "user" ? (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Select User</label>
-                <select
-                  value={selectedAssigneeId}
-                  onChange={(e) => setSelectedAssigneeId(e.target.value)}
-                  className="w-full text-xs h-8 rounded-md bg-surface-subtle border border-border px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {systemUsers.map((u) => (
-                    <option key={u.user_id} value={u.user_id}>
-                      {u.username} — L{u.clearance_level} ({u.roles.join(", ")})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Select Role</label>
-                <select
-                  value={selectedRole}
-                  onChange={(e) => setSelectedRole(e.target.value)}
-                  className="w-full text-xs h-8 rounded-md bg-surface-subtle border border-border px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="analyst">Analyst</option>
-                  <option value="engineer">Engineer</option>
-                  <option value="hr">HR Specialist</option>
-                  <option value="auditor">Auditor</option>
-                  <option value="admin">Administrator</option>
-                  <option value="viewer">Viewer</option>
-                </select>
-              </div>
-            )}
-
-            {/* Permissions */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-foreground">Allowed Permissions</label>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <label className="flex items-center gap-2 p-1.5 rounded bg-surface-subtle/60 border border-border/50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={assignActions.includes("action:query_rag")}
-                    onChange={() => toggleAssignAction("action:query_rag")}
-                    className="rounded text-emerald-500"
-                  />
-                  <span>Query RAG</span>
-                </label>
-                <label className="flex items-center gap-2 p-1.5 rounded bg-surface-subtle/60 border border-border/50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={assignActions.includes("action:retrieve_evidence")}
-                    onChange={() => toggleAssignAction("action:retrieve_evidence")}
-                    className="rounded text-emerald-500"
-                  />
-                  <span>Retrieve Evidence</span>
-                </label>
-                <label className="flex items-center gap-2 p-1.5 rounded bg-surface-subtle/60 border border-border/50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={assignActions.includes("action:download_document")}
-                    onChange={() => toggleAssignAction("action:download_document")}
-                    className="rounded text-emerald-500"
-                  />
-                  <span>Download Doc</span>
-                </label>
-                <label className="flex items-center gap-2 p-1.5 rounded bg-surface-subtle/60 border border-border/50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={assignActions.includes("action:share_data")}
-                    onChange={() => toggleAssignAction("action:share_data")}
-                    className="rounded text-emerald-500"
-                  />
-                  <span>Share Data</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Duration */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Duration</label>
-                <select
-                  value={assignDurationHours}
-                  onChange={(e) => setAssignDurationHours(Number(e.target.value))}
-                  className="w-full text-xs h-8 rounded-md bg-surface-subtle border border-border px-2 text-foreground focus:outline-none"
-                >
-                  <option value={24}>24 Hours (1 Day)</option>
-                  <option value={72}>72 Hours (3 Days)</option>
-                  <option value={168}>168 Hours (7 Days)</option>
-                  <option value={720}>720 Hours (30 Days)</option>
-                  <option value={8760}>1 Year</option>
-                </select>
-              </div>
-
-              <div className="space-y-1 flex flex-col justify-end">
-                <label className="flex items-center gap-2 text-xs font-medium cursor-pointer h-8">
-                  <input
-                    type="checkbox"
-                    checked={assignDelegable}
-                    onChange={(e) => setAssignDelegable(e.target.checked)}
-                    className="rounded text-emerald-500"
-                  />
-                  <span>Allow Re-delegation</span>
-                </label>
-              </div>
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setSharingVault(null)}
-                className="text-xs"
-              >
-                Close
-              </Button>
-              <Button
-                type="submit"
-                disabled={isAssigning || assignActions.length === 0}
-                size="sm"
-                className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1.5"
-              >
-                <Key className="h-3.5 w-3.5" />
-                <span>{isAssigning ? "Issuing Grant..." : "Grant Access"}</span>
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* UNIFIED SHARE & ASSIGN MODAL */}
+      <ShareAccessModal
+        isOpen={!!sharingVault}
+        onClose={() => {
+          setSharingVault(null)
+          setSharingDoc(null)
+        }}
+        vault={sharingVault}
+        initialDoc={sharingDoc}
+        onSuccess={refreshVaults}
+      />
 
       {/* DELETE DOCUMENT MODAL */}
       <Dialog open={!!deletingDoc} onOpenChange={(open) => !open && setDeletingDoc(null)}>

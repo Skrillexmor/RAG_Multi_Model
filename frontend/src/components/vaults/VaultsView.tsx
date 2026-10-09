@@ -43,6 +43,7 @@ import {
   DropdownMenuSeparator,
 } from "../ui/dropdown-menu"
 import { RequestAccessModal } from "../security/RequestAccessModal"
+import { ShareAccessModal } from "../common/ShareAccessModal"
 import { api } from "../../lib/api"
 import { toast } from "sonner"
 
@@ -107,48 +108,8 @@ export const VaultsView: React.FC = () => {
   }
 
   // Open Sharing / Assignment Modal
-  const handleOpenSharing = async (vault: Vault) => {
+  const handleOpenSharing = (vault: Vault) => {
     setSharingVault(vault)
-    setAssignUserIds([])
-    setAssignRoleNames([])
-    setAssignValidHours(24)
-    setIsLoadingGrants(true)
-    try {
-      const res = await api.getVaultGrants(vault.slug)
-      setActiveGrants(res.grants || [])
-    } catch {
-      setActiveGrants([])
-    } finally {
-      setIsLoadingGrants(false)
-    }
-  }
-
-  // Submit Sharing / Assignment
-  const handleAssignSubmit = async () => {
-    if (!sharingVault) return
-    if (assignUserIds.length === 0 && assignRoleNames.length === 0) {
-      toast.error("Please select at least one user or role to assign.")
-      return
-    }
-
-    setIsAssigning(true)
-    try {
-      await api.assignVault(sharingVault.slug, {
-        user_ids: assignUserIds,
-        role_names: assignRoleNames,
-        valid_hours: assignValidHours,
-      })
-      toast.success(`Access granted for compartment "${sharingVault.display_name}".`)
-      const res = await api.getVaultGrants(sharingVault.slug)
-      setActiveGrants(res.grants || [])
-      setAssignUserIds([])
-      setAssignRoleNames([])
-      refreshVaults()
-    } catch (err: any) {
-      toast.error(`Failed to assign access: ${err.message}`)
-    } finally {
-      setIsAssigning(false)
-    }
   }
 
   // Create Vault
@@ -764,165 +725,13 @@ export const VaultsView: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* SHARING & GRANTS MODAL */}
-      <Dialog open={!!sharingVault} onOpenChange={(open) => !open && setSharingVault(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Key className="h-5 w-5 text-amber-400" />
-              <span>Compartment Access & Grants</span>
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Assign time-limited access grants for compartment &quot;{sharingVault?.display_name}&quot;.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2 text-xs">
-            {/* Active Grants Preview */}
-            <div className="space-y-2">
-              <h4 className="font-semibold text-foreground text-xs flex items-center justify-between">
-                <span>Active Compartment Grants</span>
-                <span className="text-[10px] text-muted-foreground font-mono">
-                  {activeGrants.length} grants
-                </span>
-              </h4>
-
-              {isLoadingGrants ? (
-                <div className="py-3 text-center text-muted-foreground text-xs">Loading grants...</div>
-              ) : activeGrants.length === 0 ? (
-                <div className="p-3 rounded-lg bg-surface-subtle border border-border/50 text-center text-muted-foreground text-xs">
-                  No active grants assigned to external members.
-                </div>
-              ) : (
-                <div className="max-h-36 overflow-y-auto space-y-1.5 border border-border rounded-lg p-2 bg-surface-subtle">
-                  {activeGrants.map((g) => (
-                    <div
-                      key={g.grant_id}
-                      className="flex items-center justify-between px-2.5 py-1.5 rounded bg-surface-raised border border-border/40 text-[11px]"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Users className="h-3 w-3 text-emerald-400 shrink-0" />
-                        <span className="font-mono text-foreground font-medium truncate">
-                          {g.grantee_id}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Badge variant="outline" className="text-[9px] font-mono border-emerald-500/30 text-emerald-300">
-                          {g.actions.join(", ")}
-                        </Badge>
-                        <span className="text-[10px] text-muted-foreground font-mono">
-                          Until: {new Date(g.valid_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Grant Assignment Form */}
-            <div className="p-3.5 rounded-lg border border-border bg-surface-subtle space-y-3">
-              <h4 className="font-semibold text-foreground text-xs">Grant Access to Users / Roles</h4>
-
-              <div className="grid grid-cols-2 gap-3">
-                {/* Users Selection */}
-                <div>
-                  <label className="text-[11px] font-medium text-foreground block mb-1">Select Users</label>
-                  <div className="max-h-28 overflow-y-auto border border-border rounded p-1.5 space-y-1 bg-surface-raised text-[11px]">
-                    {systemUsers.map((u) => {
-                      const checked = assignUserIds.includes(u.user_id)
-                      return (
-                        <label key={u.user_id} className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              if (checked) {
-                                setAssignUserIds((prev) => prev.filter((id) => id !== u.user_id))
-                              } else {
-                                setAssignUserIds((prev) => [...prev, u.user_id])
-                              }
-                            }}
-                            className="rounded border-border text-emerald-500 focus:ring-0 h-3 w-3"
-                          />
-                          <span className="font-mono truncate">{u.username}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Roles Selection */}
-                <div>
-                  <label className="text-[11px] font-medium text-foreground block mb-1">Select Roles</label>
-                  <div className="max-h-28 overflow-y-auto border border-border rounded p-1.5 space-y-1 bg-surface-raised text-[11px]">
-                    {["admin", "engineer", "security_officer", "compliance_auditor", "external_partner"].map((r) => {
-                      const checked = assignRoleNames.includes(r)
-                      return (
-                        <label key={r} className="flex items-center gap-1.5 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              if (checked) {
-                                setAssignRoleNames((prev) => prev.filter((name) => name !== r))
-                              } else {
-                                setAssignRoleNames((prev) => [...prev, r])
-                              }
-                            }}
-                            className="rounded border-border text-emerald-500 focus:ring-0 h-3 w-3"
-                          />
-                          <span className="font-mono truncate capitalize">{r.replace("_", " ")}</span>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Validity Window */}
-              <div className="flex items-center justify-between pt-1">
-                <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                  Grant Time Limit (TTL):
-                </label>
-                <select
-                  value={assignValidHours}
-                  onChange={(e) => setAssignValidHours(Number(e.target.value))}
-                  className="h-7 px-2 rounded border border-border bg-surface-raised text-xs text-foreground outline-none font-mono"
-                >
-                  <option value={1}>1 Hour</option>
-                  <option value={4}>4 Hours</option>
-                  <option value={8}>8 Hours (Workshift)</option>
-                  <option value={24}>24 Hours (1 Day)</option>
-                  <option value={72}>72 Hours (3 Days)</option>
-                  <option value={168}>7 Days</option>
-                </select>
-              </div>
-
-              <Button
-                onClick={handleAssignSubmit}
-                disabled={isAssigning}
-                size="sm"
-                className="w-full text-xs h-8 bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
-              >
-                {isAssigning ? "Issuing Grant..." : "Issue Time-Limited Grant"}
-              </Button>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSharingVault(null)}
-              className="text-xs h-8"
-            >
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* UNIFIED SHARING & ACCESS MODAL */}
+      <ShareAccessModal
+        isOpen={!!sharingVault}
+        onClose={() => setSharingVault(null)}
+        vault={sharingVault}
+        onSuccess={refreshVaults}
+      />
 
       {/* DELETE CONFIRMATION MODAL */}
       <Dialog open={!!deletingVault} onOpenChange={(open) => !open && setDeletingVault(null)}>

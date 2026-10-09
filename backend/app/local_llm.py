@@ -4,6 +4,7 @@ import urllib.request
 from typing import List, Dict, Any, Tuple, Optional
 from .models import EvidenceItem, Claim, Citation, Vault
 from .config import LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT_SECONDS, LLM_RUNTIME
+from .model_manager import local_model_manager
 
 class LocalLLM:
     """
@@ -48,63 +49,38 @@ class LocalLLM:
         return installed[0], installed
 
     def get_status(self) -> Dict[str, Any]:
-        """Provides status report for local offline LLM connection."""
+        """Provides status report for local offline LLM connection and multimodal single-model manager."""
         active_model, installed = self.get_best_model()
         is_connected = active_model is not None
+        mgr_status = local_model_manager.get_system_status()
         return {
             "connected": is_connected,
             "runtime": LLM_RUNTIME,
             "endpoint": LLM_BASE_URL,
             "active_model": active_model or LLM_MODEL,
             "installed_models": installed,
-            "recommended_models": ["llama3.2", "mistral", "llama3.1:8b", "qwen2.5:3b"],
+            "multimodal_models": mgr_status.get("installed_models", {}),
+            "single_model_policy_active": True,
+            "current_working_model": mgr_status.get("current_active_model", "none (all on rest)"),
+            "recommended_models": ["gemma3:4b", "qwen2.5vl:3b", "llama3.2", "mistral"],
             "setup_guide": {
-                "step1": "Download and install Ollama from https://ollama.com",
-                "step2": "Open a terminal and run: ollama run llama3.2",
-                "step3": "DARS-RAG will automatically connect and generate full neural RAG answers."
+                "step1": "Audio processed via local faster-whisper (base, int8 CPU).",
+                "step2": "Images & diagrams analyzed via local Qwen-VL (qwen2.5vl:3b).",
+                "step3": "Strict single-model RAM protection: Only 1 model active at any time, idle models on rest."
             }
         }
 
     def _call_ollama(self, prompt: str, system_prompt: str) -> Optional[Dict[str, Any]]:
-        """Queries local Ollama endpoint requesting structured JSON."""
+        """Queries local Ollama endpoint requesting structured JSON with strict single-model RAM protection."""
         model_name, _ = self.get_best_model()
         if not model_name:
             model_name = LLM_MODEL
         try:
-            req_data = json.dumps({
-                "model": model_name,
-                "prompt": prompt,
-                "system": system_prompt,
-                "stream": False,
-                "format": "json"
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                self.ollama_url,
-                data=req_data,
-                headers={"Content-Type": "application/json"}
+            return local_model_manager.generate_chat_response(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model_name=model_name
             )
-            with urllib.request.urlopen(req, timeout=LLM_TIMEOUT_SECONDS) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                response_str = data.get("response", "").strip()
-
-                # Clean markdown fences if model wrapped response in backticks
-                if response_str.startswith("```json"):
-                    response_str = response_str[7:]
-                elif response_str.startswith("```"):
-                    response_str = response_str[3:]
-                if response_str.endswith("```"):
-                    response_str = response_str[:-3]
-                response_str = response_str.strip()
-
-                try:
-                    parsed = json.loads(response_str)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except Exception:
-                    # If model returned plain text or unescaped quotes, wrap as answer
-                    if response_str:
-                        return {"answer": response_str, "claims": [], "citations": []}
-                return None
         except Exception as e:
             print(f"[Ollama Call Error] {e}")
             return None

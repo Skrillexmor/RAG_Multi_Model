@@ -1042,3 +1042,8 @@ class TestSecurityMatrix:
         self.log("AUDIT-003", "Signed Audit Checkpoint Created and Verified", "Audit Integrity", passed, f"Checkpoint {cp['checkpoint_id']} signed with Ed25519.")
 
 test_runner = TestSecurityMatrix()
+
+if __name__ == "__main__":
+    results = test_runner.run_all()
+    passed = sum(1 for r in results if r.get("passed"))
+    print(f"Total Security Matrix Tests: {len(results)} | Passed: {passed} | Failed: {len(results) - passed}")

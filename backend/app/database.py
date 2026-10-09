@@ -37,6 +37,24 @@ class Database:
             );
             """)
 
+            # Authoritative Server-Side User Sessions (§3.1, Inactivity & Revocation)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token_jti TEXT UNIQUE NOT NULL,
+                created_at TEXT NOT NULL,
+                last_active_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                is_revoked INTEGER NOT NULL DEFAULT 0,
+                revoked_at TEXT,
+                inactivity_timeout_seconds INTEGER NOT NULL DEFAULT 300,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_active ON sessions(user_id, is_revoked);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_jti ON sessions(token_jti);")
+
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS roles (
                 role_id TEXT PRIMARY KEY,
@@ -236,6 +254,35 @@ class Database:
             );
             """)
 
+            # Dynamic & Query-Aware Cached Chunks (MEDIUM & HIGH Modes, Content-Hash Bound)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS dynamic_chunks (
+                cache_key TEXT PRIMARY KEY,
+                chunk_id TEXT UNIQUE NOT NULL,
+                resource_id TEXT NOT NULL,
+                resource_version INTEGER NOT NULL DEFAULT 1,
+                vault_id TEXT NOT NULL,
+                source_content_hash TEXT NOT NULL,
+                source_span TEXT NOT NULL,
+                strategy_version TEXT NOT NULL DEFAULT 'v1',
+                content TEXT NOT NULL,
+                classification INTEGER NOT NULL,
+                min_clearance INTEGER NOT NULL,
+                acl_selector TEXT NOT NULL,
+                deny_selector TEXT NOT NULL,
+                provenance TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                storage_path TEXT,
+                access_count INTEGER NOT NULL DEFAULT 1,
+                last_accessed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (resource_id) REFERENCES resources(resource_id),
+                FOREIGN KEY (vault_id) REFERENCES vaults(vault_id)
+            );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dynamic_chunks_resource ON dynamic_chunks(resource_id);")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dynamic_chunks_vault ON dynamic_chunks(vault_id);")
+
             # 6. Structured Data Tables, Records & Field-Level Policies (§24, §26, §27)
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS structured_tables (
@@ -385,6 +432,34 @@ class Database:
                     queue.append(row["grant_id"])
 
             for gid in revoked_ids:
+                # If grant targeted a specific resource, clean up resource_manifests ACL
+                cursor.execute("SELECT grantee_type, grantee_id, selector FROM grants WHERE grant_id = ?", (gid,))
+                g_row = cursor.fetchone()
+                if g_row and g_row["selector"]:
+                    try:
+                        sel = json.loads(g_row["selector"]) if isinstance(g_row["selector"], str) else g_row["selector"]
+                        res_id = sel.get("resource_id")
+                        if res_id:
+                            cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
+                            m_row = cursor.fetchone()
+                            if m_row:
+                                g_type = g_row["grantee_type"]
+                                g_id = g_row["grantee_id"]
+                                if g_type == "user":
+                                    u_clean = g_id.replace("user:", "")
+                                    users_list = json.loads(m_row["allowed_users"] or "[]")
+                                    new_users = [u for u in users_list if u != u_clean and u != f"user:{u_clean}"]
+                                    if len(new_users) != len(users_list):
+                                        cursor.execute("UPDATE resource_manifests SET allowed_users = ?, acl_version = acl_version + 1 WHERE resource_id = ?", (json.dumps(new_users), res_id))
+                                elif g_type == "role":
+                                    r_clean = g_id.replace("role:", "")
+                                    roles_list = json.loads(m_row["allowed_roles"] or "[]")
+                                    new_roles = [r for r in roles_list if r != r_clean and r != f"role:{r_clean}"]
+                                    if len(new_roles) != len(roles_list):
+                                        cursor.execute("UPDATE resource_manifests SET allowed_roles = ?, acl_version = acl_version + 1 WHERE resource_id = ?", (json.dumps(new_roles), res_id))
+                    except Exception:
+                        pass
+
                 cursor.execute("""
                 UPDATE grants
                 SET state = 'revoked', revoked_at = ?, revoked_by = ?, revoke_reason = ?
