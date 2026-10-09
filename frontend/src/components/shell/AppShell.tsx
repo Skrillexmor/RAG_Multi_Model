@@ -40,8 +40,9 @@ export const AppShell: React.FC = () => {
       case "audit":
         return <AuditView />
       case "chunks":
-      case "tests":
         return <ChunkStoreView />
+      case "tests":
+        return <SecurityTestsView />
       case "settings":
         return <SettingsView />
       default:

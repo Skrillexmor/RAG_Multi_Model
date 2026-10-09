@@ -94,16 +94,15 @@ class CanonicalGate:
                 # 3. Retrieve and Decrypt Canonical Content (§15, §21)
                 canonical_plaintext = None
                 storage_path_str = chunk_row["storage_path"] if "storage_path" in chunk_row.keys() else None
-                if storage_path_str and Path(storage_path_str).exists():
-                    try:
-                        decrypted_bytes = decrypt_from_file(Path(storage_path_str), vault_kek)
-                        canonical_plaintext = decrypted_bytes.decode("utf-8")
-                    except Exception:
-                        excluded_count += 1
-                        continue
-                else:
-                    # Fallback to database content field
-                    canonical_plaintext = chunk_row["content"]
+                if not storage_path_str or not Path(storage_path_str).exists():
+                    excluded_count += 1
+                    continue
+                try:
+                    decrypted_bytes = decrypt_from_file(Path(storage_path_str), vault_kek)
+                    canonical_plaintext = decrypted_bytes.decode("utf-8")
+                except Exception:
+                    excluded_count += 1
+                    continue
 
                 # 4. Content Hash Integrity Verification (§21, §189)
                 computed_hash = compute_content_hash(canonical_plaintext.encode("utf-8"))

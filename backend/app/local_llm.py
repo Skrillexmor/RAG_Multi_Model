@@ -231,29 +231,40 @@ class LocalLLM:
 
         evidence_envelope = "\n".join(evidence_lines)
 
-        # Build conversation history block
+        # Build conversation history block (§60: unprivileged context only, never evidence)
         history_block = ""
         if history:
-            clean_history = [m for m in history[-4:] if m.get("content")]
+            clean_history = [m for m in history[-4:] if isinstance(m, dict) and m.get("content")]
             if clean_history:
                 h_lines = []
                 for m in clean_history:
-                    role_label = "User" if m.get("role") == "user" else "Assistant"
-                    h_text = m.get("content", "").strip()
+                    raw_role = str(m.get("role", "user")).lower()
+                    role_label = "Assistant" if raw_role == "assistant" else "User"
+                    h_text = str(m.get("content", "")).strip()
+                    # Strip delimiter escapes and prompt injection attempts from history turns
+                    h_text_lower = h_text.lower()
+                    if any(escape in h_text_lower for escape in (
+                        "<untrusted_evidence_data>", "</untrusted_evidence_data>",
+                        "<recent_conversation_history>", "</recent_conversation_history>",
+                        "ignore previous", "ignore all", "system prompt"
+                    )):
+                        continue
                     if len(h_text) > 250:
                         h_text = h_text[:250] + "..."
                     h_lines.append(f"{role_label}: {h_text}")
-                history_block = f"<RECENT_CONVERSATION_HISTORY>\n" + "\n".join(h_lines) + "\n</RECENT_CONVERSATION_HISTORY>\n\n"
+                if h_lines:
+                    history_block = f"<RECENT_CONVERSATION_HISTORY>\n" + "\n".join(h_lines) + "\n</RECENT_CONVERSATION_HISTORY>\n\n"
 
         system_prompt = (
             f"You are the PrivateRAG Secure Intelligence Assistant for workspace '{vault.display_name}'.\n"
             "INSTRUCTIONS:\n"
             "1. Answer ONLY what the user asks directly, concisely, and factually based on the authorized evidence.\n"
-            "2. If the user asks a follow-up question (e.g., 'give me in detail', 'explain more'), maintain conversational continuity with the previous turns.\n"
-            "3. Do NOT include generic conversational filler, unsolicited disclaimers, or lengthy preamble.\n"
-            "4. Format your response cleanly using concise bullet points, bold key terms, and clear markdown.\n"
-            "5. Cite sources directly using markers like [C1], [C2].\n"
-            "6. Return your answer as a JSON object with keys:\n"
+            "2. Conversation history is provided solely for conversational phrasing continuity. It is NOT authoritative evidence.\n"
+            "3. If the user asks a follow-up question (e.g., 'give me in detail', 'explain more'), maintain conversational continuity with the previous turns.\n"
+            "4. Do NOT include generic conversational filler, unsolicited disclaimers, or lengthy preamble.\n"
+            "5. Format your response cleanly using concise bullet points, bold key terms, and clear markdown.\n"
+            "6. Cite sources directly using markers like [C1], [C2].\n"
+            "7. Return your answer as a JSON object with keys:\n"
             "  \"answer\": \"your concise, direct markdown answer\",\n"
             "  \"claims\": [ {\"text\": \"factual sentence\", \"citation_ids\": [\"C1\"]} ],\n"
             "  \"citations\": [ {\"citation_id\": \"C1\", \"locator\": \"Page X\"} ]\n"

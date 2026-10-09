@@ -225,7 +225,7 @@ class RetrievalPipeline:
             raise ValueError(f"Unsupported retrieval mode '{mode}'. Valid modes: LOW, MEDIUM, HIGH.")
 
         if mode_clean == "LOW":
-            return cls._retrieve_low(query, compiled_filter, top_k)
+            return cls._retrieve_low(query, compiled_filter, top_k, vault)
         elif mode_clean == "MEDIUM":
             return cls._retrieve_medium(query, compiled_filter, vault, principal, top_k, resource_id)
         else:
@@ -236,22 +236,36 @@ class RetrievalPipeline:
         cls,
         query: str,
         compiled_filter: CompiledFilter,
-        top_k: int = 10
+        top_k: int = 10,
+        vault: Optional[Vault] = None
     ) -> List[Tuple[Chunk, float]]:
         """
         LOW Mode: Standard direct vector search from persistent index.
         """
         candidates = vector_store.search(query, compiled_filter, top_k=top_k)
+        kek_cache: Dict[str, bytes] = {}
         with db.get_connection() as conn:
             cursor = conn.cursor()
             for chunk, score in candidates:
-                cursor.execute("SELECT content FROM chunks WHERE chunk_id = ?", (chunk.chunk_id,))
+                cursor.execute("SELECT content, storage_path, vault_id FROM chunks WHERE chunk_id = ?", (chunk.chunk_id,))
                 row = cursor.fetchone()
-                if not row or not row["content"]:
-                    cursor.execute("SELECT content FROM dynamic_chunks WHERE chunk_id = ?", (chunk.chunk_id,))
+                if not row:
+                    cursor.execute("SELECT content, storage_path, vault_id FROM dynamic_chunks WHERE chunk_id = ?", (chunk.chunk_id,))
                     row = cursor.fetchone()
-                if row and row["content"]:
-                    chunk.content = row["content"]
+                if row:
+                    text = row["content"] or ""
+                    sp = row["storage_path"]
+                    v_id = row["vault_id"] or (vault.vault_id if vault else getattr(chunk, "vault_id", None))
+                    if sp and Path(sp).exists() and v_id:
+                        try:
+                            if v_id not in kek_cache:
+                                kek_cache[v_id] = derive_vault_kek(v_id)
+                            dec = decrypt_from_file(Path(sp), kek_cache[v_id])
+                            text = dec.decode("utf-8", errors="replace")
+                        except Exception:
+                            pass
+                    if text:
+                        chunk.content = text
         return candidates
 
     @classmethod
@@ -396,7 +410,7 @@ class RetrievalPipeline:
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                         """, (
                             cache_key, dyn_chunk_id, parent_chunk.resource_id, res_version, vault.vault_id,
-                            res_content_hash, span_id, cls.STRATEGY_VERSION, slice_content_clean,
+                            res_content_hash, span_id, cls.STRATEGY_VERSION, "",
                             parent_chunk.classification, parent_chunk.min_clearance,
                             json.dumps(parent_chunk.acl_selector), json.dumps(parent_chunk.deny_selector),
                             json.dumps(dyn_provenance), dyn_hash, str(dyn_file_path),
@@ -412,7 +426,7 @@ class RetrievalPipeline:
                             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """, (
                             dyn_chunk_id, parent_chunk.resource_id, vault.vault_id, parent_chunk.chunk_index,
-                            slice_content_clean, parent_chunk.classification, parent_chunk.min_clearance,
+                            "", parent_chunk.classification, parent_chunk.min_clearance,
                             json.dumps(parent_chunk.acl_selector), json.dumps(parent_chunk.deny_selector),
                             json.dumps(dyn_provenance), dyn_hash, str(dyn_file_path), now_iso
                         ))
@@ -517,7 +531,14 @@ class RetrievalPipeline:
                     """, (chunk.resource_id, chunk.chunk_index + 1, principal.clearance))
                     next_c = cursor.fetchone()
                     if next_c:
-                        next_text = next_c["content"]
+                        next_text = next_c["content"] or ""
+                        nsp = next_c["storage_path"]
+                        if nsp and Path(nsp).exists():
+                            try:
+                                dec = decrypt_from_file(Path(nsp), vault_kek)
+                                next_text = dec.decode("utf-8", errors="replace")
+                            except Exception:
+                                pass
                         expanded_content = f"{canonical_text}\n\n[Expanded Context]:\n{next_text[:300]}"
 
                 # Step 3: Lightweight Local Reranking Score

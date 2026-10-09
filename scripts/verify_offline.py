@@ -66,6 +66,21 @@ def check_offline_invariants():
     else:
         checks.append(("STORE-01", "AES-256-GCM Encrypted Storage", False, "Encrypted storage empty or missing"))
 
+    # 7. Frontend Air-Gapped Zero-CDN Check
+    import re
+    index_html = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+    if index_html.exists():
+        content = index_html.read_text(encoding="utf-8")
+        # Ignore XML namespace identifiers (e.g., xmlns='http://www.w3.org/2000/svg')
+        cleaned_content = re.sub(r'xmlns=["\']http://www\.w3\.org/[^"\']+["\']', '', content)
+        has_external_link = "http://" in cleaned_content or "https://" in cleaned_content
+        if not has_external_link:
+            checks.append(("AIRGAP-01", "Frontend Zero External CDNs / Fonts", True, "Zero outbound external links in index.html (Fully air-gapped)"))
+        else:
+            checks.append(("AIRGAP-01", "Frontend Zero External CDNs / Fonts", False, "External http(s) links detected in index.html"))
+    else:
+        checks.append(("AIRGAP-01", "Frontend Zero External CDNs / Fonts", True, "No index.html found"))
+
     # Display Results
     all_passed = True
     for cid, name, passed, details in checks:

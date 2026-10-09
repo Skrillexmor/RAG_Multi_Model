@@ -249,18 +249,23 @@ export const Sidebar: React.FC = () => {
           )}
         </div>
 
-        {/* Action Menu (Anchored, Never Squashed) */}
+        {/* Action Menu (Always Visible For Every Chat) */}
         {!isEditing && (
           <div
-            className="shrink-0 z-20 flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity ml-1"
+            className="shrink-0 z-20 flex items-center ml-1"
             onClick={(e) => e.stopPropagation()}
           >
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="p-1.5 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border/60 shadow-xs"
+                  className={`p-1.5 rounded-md transition-colors border shadow-xs ${
+                    isActive
+                      ? "text-foreground bg-background/60 hover:bg-background border-border/60 hover:text-foreground"
+                      : "text-muted-foreground/75 hover:text-foreground hover:bg-secondary/80 border-transparent hover:border-border/40"
+                  }`}
                   aria-label="Conversation options"
+                  title="Conversation options (Pin, Rename, Delete)"
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
                 </button>

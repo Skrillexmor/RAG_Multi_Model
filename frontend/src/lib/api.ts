@@ -37,18 +37,23 @@ class ApiClient {
   private token: string | null = null
 
   constructor() {
-    this.token = sessionStorage.getItem("rag_token") || localStorage.getItem("rag_token")
+    this.token = sessionStorage.getItem("rag_token")
+    // Clean up any legacy long-lived token from persistent localStorage
+    try {
+      localStorage.removeItem("rag_token")
+    } catch {}
   }
 
   setToken(token: string | null) {
     this.token = token
     if (token) {
       sessionStorage.setItem("rag_token", token)
-      localStorage.setItem("rag_token", token)
     } else {
       sessionStorage.removeItem("rag_token")
-      localStorage.removeItem("rag_token")
     }
+    try {
+      localStorage.removeItem("rag_token")
+    } catch {}
   }
 
   getToken(): string | null {

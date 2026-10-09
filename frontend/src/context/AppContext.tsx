@@ -131,29 +131,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const initializeAuth = useCallback(async (targetPersona: DemoPersona) => {
     setIsLoadingUser(true)
     try {
-      // First try login
-      const loginRes = await api.login(targetPersona.username, `${targetPersona.username}123`)
-      setPrincipal(loginRes.principal)
-      // Set initial lease and inactivity timeout
-      setLeaseSecondsRemaining(300)
-      setSessionRemainingSeconds(300)
-    } catch (err: any) {
-      console.warn("Auto-login error:", err)
-      // Demo fallback switch
+      // Check if existing session token is stored and valid
+      if (api.getToken()) {
+        try {
+          const meRes = await api.getMe() as any
+          const currentPrincipal: Principal = meRes.principal || meRes
+          setPrincipal(currentPrincipal)
+          const matched = DEMO_PERSONAS.find((p) => p.username === currentPrincipal.username.toLowerCase())
+          if (matched) {
+            setPersona(matched)
+          }
+          setLeaseSecondsRemaining(300)
+          setSessionRemainingSeconds(300)
+          return
+        } catch {
+          // Token invalid or expired - clear it and require re-authentication
+          api.setToken(null)
+          setPrincipal(null)
+        }
+      }
+
+      // Try login with target persona credentials
       try {
-        const switchRes = await api.switchPersona(targetPersona.username)
-        setPrincipal(switchRes.principal)
+        const loginRes = await api.login(targetPersona.username, `${targetPersona.username}123`)
+        setPrincipal(loginRes.principal)
+        setLeaseSecondsRemaining(300)
         setSessionRemainingSeconds(300)
-      } catch (e: any) {
-        setPrincipal({
-          user_id: "u_alice",
-          username: "alice",
-          roles: ["admin", "analyst"],
-          clearance_level: 4,
-          tenant_id: "tenant-default",
-          is_active: true,
-        })
-        setSessionRemainingSeconds(300)
+      } catch (err: any) {
+        console.warn("Authentication required:", err)
+        // Fail-closed: Never fake an in-memory principal
+        setPrincipal(null)
+        api.setToken(null)
+        setIsAuthModalOpen(true)
       }
     } finally {
       setIsLoadingUser(false)
@@ -357,11 +366,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       toast.success("Session extended for 5 minutes")
     } catch (err: any) {
-      console.warn("Session renewal fallback:", err)
-      setSessionRemainingSeconds(300)
-      toast.info("Session refreshed")
+      console.warn("Session renewal failed:", err)
+      toast.error(`Session renewal failed: ${err.message || "Session expired or rejected"}`)
+      if (err.status === 401 || err.message?.includes("401") || err.message?.includes("expired") || err.message?.includes("revoked")) {
+        logout()
+      }
     }
-  }, [])
+  }, [logout])
 
   // Genuine User Activity Tracker (Keyboard, Pointer, Touch, Scroll, Wheel)
   const handleUserActivity = useCallback(() => {

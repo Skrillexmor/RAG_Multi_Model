@@ -76,16 +76,6 @@ class SessionService:
             row = cursor.fetchone()
 
             if not row:
-                if user_id:
-                    self.create_session(user_id=user_id, token_jti=token_jti)
-                    return {
-                        "session_id": token_jti,
-                        "user_id": user_id,
-                        "remaining_seconds": INACTIVITY_TIMEOUT_SECONDS,
-                        "is_warning": False,
-                        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
-                        "active": True
-                    }
                 raise SessionError("Session not found or invalid (T-SESS-002).", code="INVALID_SESSION")
 
             if row["is_revoked"]:
@@ -164,15 +154,6 @@ class SessionService:
             row = cursor.fetchone()
 
             if not row:
-                if user_id:
-                    self.create_session(user_id=user_id, token_jti=token_jti)
-                    return {
-                        "status": "RENEWED",
-                        "active": True,
-                        "remaining_seconds": INACTIVITY_TIMEOUT_SECONDS,
-                        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
-                        "last_active_at": now_iso
-                    }
                 raise SessionError("Cannot renew: session is invalid or revoked.", code="SESSION_REVOKED")
 
             if row["is_revoked"]:
@@ -218,14 +199,6 @@ class SessionService:
             row = cursor.fetchone()
 
             if not row:
-                if user_id:
-                    self.create_session(user_id=user_id, token_jti=token_jti)
-                    return {
-                        "status": "ACTIVE",
-                        "active": True,
-                        "remaining_seconds": INACTIVITY_TIMEOUT_SECONDS,
-                        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS
-                    }
                 raise SessionError("Session is invalid or revoked.", code="SESSION_REVOKED")
 
             if row["is_revoked"]:
@@ -274,15 +247,6 @@ class SessionService:
             row = cursor.fetchone()
 
             if not row:
-                if user_id:
-                    self.create_session(user_id=user_id, token_jti=token_jti)
-                    return {
-                        "active": True,
-                        "is_active": True,
-                        "remaining_seconds": INACTIVITY_TIMEOUT_SECONDS,
-                        "is_warning": False,
-                        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS
-                    }
                 return {
                     "active": False,
                     "is_active": False,

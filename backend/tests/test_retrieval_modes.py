@@ -30,12 +30,15 @@ def setup_retrieval_fixture():
     test_res_id = "res_doc_retrieval_01"
     vault_kek = derive_vault_kek(test_vault_id)
 
+    vector_store.delete_resource_vectors(test_res_id)
+    vector_store.delete_points(["chk_retrieval_1", "chk_retrieval_2", "chk_retrieval_3"])
+
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM dynamic_chunks WHERE vault_id = ?", (test_vault_id,))
-        cursor.execute("DELETE FROM chunks WHERE vault_id = ?", (test_vault_id,))
-        cursor.execute("DELETE FROM resource_manifests WHERE vault_id = ?", (test_vault_id,))
-        cursor.execute("DELETE FROM resources WHERE vault_id = ?", (test_vault_id,))
+        cursor.execute("DELETE FROM dynamic_chunks WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
+        cursor.execute("DELETE FROM chunks WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
+        cursor.execute("DELETE FROM resource_manifests WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
+        cursor.execute("DELETE FROM resources WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
         # Create test vault
         cursor.execute("""
             INSERT OR REPLACE INTO vaults (
@@ -132,12 +135,14 @@ def setup_retrieval_fixture():
     }
 
     # Cleanup
+    vector_store.delete_resource_vectors(test_res_id)
+    vector_store.delete_points(["chk_retrieval_1", "chk_retrieval_2", "chk_retrieval_3"])
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM dynamic_chunks WHERE vault_id = ?", (test_vault_id,))
-        cursor.execute("DELETE FROM chunks WHERE vault_id = ?", (test_vault_id,))
-        cursor.execute("DELETE FROM resource_manifests WHERE vault_id = ?", (test_vault_id,))
-        cursor.execute("DELETE FROM resources WHERE vault_id = ?", (test_vault_id,))
+        cursor.execute("DELETE FROM dynamic_chunks WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
+        cursor.execute("DELETE FROM chunks WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
+        cursor.execute("DELETE FROM resource_manifests WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
+        cursor.execute("DELETE FROM resources WHERE vault_id = ? OR resource_id = ?", (test_vault_id, test_res_id))
         cursor.execute("DELETE FROM vaults WHERE vault_id = ?", (test_vault_id,))
         conn.commit()
 

@@ -20,10 +20,11 @@ QDRANT_STORAGE_DIR = DATA_DIR / "qdrant_storage"
 QDRANT_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Environment / Operational Mode
-# Options: "production" (strict security, no impersonation, no simulated time), "demo" (for local presentation)
-APP_MODE = os.getenv("APP_MODE", "demo").lower()
-DEMO_MODE = APP_MODE in ("demo", "dev", "test")
-TEST_MODE = os.getenv("TEST_MODE", "true" if DEMO_MODE else "false").lower() == "true"
+# Default is "production" (strict security, fail-closed, no demo bypasses).
+# "demo" must be explicitly enabled via APP_MODE=demo.
+APP_MODE = os.getenv("APP_MODE", "production").lower()
+DEMO_MODE = APP_MODE in ("demo", "dev")
+TEST_MODE = os.getenv("TEST_MODE", "false").lower() == "true"
 
 # Cryptographic Keys & Secrets (Automatic local file generation if not in env)
 _SECRET_KEY_FILE = DATA_DIR / ".jwt_secret"

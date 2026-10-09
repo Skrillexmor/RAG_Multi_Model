@@ -160,7 +160,7 @@ class MultiModalIngestion:
                     provenance, content_hash, storage_path, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    chunk_id, resource_id, vault_id, idx, sec_text,
+                    chunk_id, resource_id, vault_id, idx, "",
                     chunk_classification, chunk_min_clearance,
                     json.dumps(chunk_acl), json.dumps(chunk_deny),
                     json.dumps(provenance), chunk_hash, str(chunk_file_path), now_iso
@@ -173,7 +173,7 @@ class MultiModalIngestion:
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 """, (
                     f"span_{uuid4().hex[:8]}", resource_id, chunk_id, vault_id,
-                    provenance["locator"], sec_text
+                    provenance["locator"], ""
                 ))
 
                 # 5. Index Chunk metadata in persistent Qdrant (Excluding raw plaintext content)

@@ -14,7 +14,7 @@ from backend.app.database import db
 from backend.app.config import JWT_SECRET, JWT_ALGORITHM, ENCRYPTED_DIR
 from backend.app.crypto import (
     verify_password, hash_password, sign_grant_payload, verify_grant_signature,
-    derive_vault_kek, encrypt_blob, decrypt_blob, compute_content_hash,
+    derive_vault_kek, encrypt_blob, decrypt_blob, decrypt_from_file, compute_content_hash,
     verify_signature, get_system_public_key_bytes, compute_audit_hash
 )
 from backend.app.models import (
@@ -938,10 +938,24 @@ class TestSecurityMatrix:
 
     def test_store_002_content_hash_integrity_verification(self):
         with db.get_connection() as conn:
-            row = conn.cursor().execute("SELECT content, content_hash FROM chunks LIMIT 1").fetchone()
-        computed = compute_content_hash(row["content"].encode("utf-8"))
-        passed = computed == row["content_hash"]
-        self.log("STORE-002", "Content Hash Integrity Matches", "Storage Security", passed, "SHA-256 hash verified against chunk content.")
+            row = conn.cursor().execute("SELECT content_hash, storage_path, vault_id FROM chunks WHERE storage_path IS NOT NULL LIMIT 1").fetchone()
+        if not row or not Path(row["storage_path"]).exists():
+            vid = "v_default"
+            kek = derive_vault_kek(vid)
+            test_content = b"Integrity verification test content"
+            target_path = ENCRYPTED_DIR / "test_store_002.enc"
+            from backend.app.crypto import encrypt_to_file
+            expected_hash = encrypt_to_file(test_content, target_path, kek)
+            decrypted = decrypt_from_file(target_path, kek)
+            computed = compute_content_hash(decrypted)
+            passed = (computed == expected_hash)
+        else:
+            kek = derive_vault_kek(row["vault_id"])
+            decrypted = decrypt_from_file(Path(row["storage_path"]), kek)
+            computed = compute_content_hash(decrypted)
+            passed = (computed == row["content_hash"])
+        self.log("STORE-002", "Content Hash Integrity Matches", "Storage Security", passed, "SHA-256 hash verified against decrypted canonical chunk content.")
+        assert passed
 
     def test_store_003_quarantine_rejects_empty_file(self):
         passed = False
