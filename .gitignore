@@ -1,10 +1,106 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# DARS-RAG Unified .gitignore
+# Excludes chunks, encrypted blobs, media caches, database files, and dev junk
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Chunks, Encrypted Payloads & Storage Caches
+# ------------------------------------------------------------------------------
+storage/encrypted/*
+!storage/encrypted/.gitkeep
+storage/media/*
+!storage/media/.gitkeep
+storage/quarantine/*
+!storage/quarantine/.gitkeep
+
+# Chunk extensions & local chunk caches
+*.chunk
+*.chunks
+*.enc
+chunks/
+chunk_cache/
+chunk_store/
+dynamic_chunks/
+fastembed_cache/
+.cache/
+
+# ------------------------------------------------------------------------------
+# 2. Local Database, Vector Store & Audit Logs
+# ------------------------------------------------------------------------------
+data/*
+!data/.gitkeep
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite3
+data/*.json
+data/*.log
+data/qdrant_db/
+data/qdrant_storage/
+
+# Cryptographic master keys & local secrets
+data/.jwt_secret
+data/.master_kek.hex
+*.pem
+*.key
+*.hex
+*.secret
+*.token
+
+# ------------------------------------------------------------------------------
+# 3. Uploaded / Test Media & Document Binaries (keep source code clean)
+# ------------------------------------------------------------------------------
+*.mp3
+*.wav
+*.ogg
+*.flac
+*.m4a
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.bin
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# Test document uploads in root
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+
+# ------------------------------------------------------------------------------
+# 4. Environment Variables & Credentials
+# ------------------------------------------------------------------------------
+.env
+.env.local
+.env.*
+!.env.example
+
+# ------------------------------------------------------------------------------
+# 5. Frontend (Node / Vite / React)
+# ------------------------------------------------------------------------------
+frontend/node_modules/
+node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------------------------------------------
+# 6. Python, Packaging & Virtual Environments
+# ------------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -12,7 +108,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-
 lib64/
 parts/
 sdist/
@@ -21,47 +116,30 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual environments
 venv/
 .venv/
 env/
 ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# Sensitive data, encryption keys & local databases
-data/*.db
-data/*.db-*
-data/*.sqlite
-data/*.sqlite3
-data/*.pem
-data/*.key
-data/*.hex
-data/.*
-data/*.json
-data/*.log
-data/qdrant_db/
-data/qdrant_storage/
-storage/encrypted/*.enc
-storage/quarantine/*
-
-# Keep directory structure
-!data/.gitkeep
-!storage/encrypted/.gitkeep
-!storage/quarantine/.gitkeep
-
-# Environment variables & secrets
-.env
-.env.local
-
-# IDE & OS
+# ------------------------------------------------------------------------------
+# 7. IDE, OS & Temporary Files
+# ------------------------------------------------------------------------------
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
 .DS_Store
 Thumbs.db
-
-# Logs & temp files
+desktop.ini
 *.log
 scratch/
-frontend/node_modules/
+tmp/
+temp/
+*.tmp
+*.bak
