@@ -1,8 +1,9 @@
 import json
 import base64
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from .models import Principal, Vault, AuthorizationLease, Grant
 from .crypto import sign_data, verify_signature, get_system_public_key_bytes
+from .database import db
 
 class CompiledFilter:
     """Opaque, server-compiled cryptographic retrieval filter envelope (§19, §273)."""
@@ -61,15 +62,65 @@ class PolicyCompiler:
             {"key": "acl_selector", "match": {"any": subjects}}
         ]
 
-        if resource_id:
-            must_clauses.append({"key": "resource_id", "match": {"value": resource_id}})
+        # 2. Folder-wide vs Granular Resource Scoping (§4, §32)
+        is_owner = (principal.user_id == vault.owner_id)
+        is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+        has_folder_wide_grant = any(
+            not g.selector or g.selector.get("all") is True or 
+            (not g.selector.get("resource_id") and not g.selector.get("include_tags"))
+            for g in matching_grants
+        )
+
+        if is_owner or is_admin or has_folder_wide_grant:
+            # Caller has folder-wide access: respect explicit resource_id filter if provided
+            if resource_id:
+                must_clauses.append({"key": "resource_id", "match": {"value": resource_id}})
+        else:
+            # Granular access: caller only has rights to specifically granted resources!
+            granted_res_ids = {
+                g.selector.get("resource_id")
+                for g in matching_grants
+                if g.selector and g.selector.get("resource_id")
+            }
+
+            # Also include resources where principal is explicitly in allowed_users
+            manifest_res_ids = set()
+            try:
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT resource_id, allowed_users FROM resource_manifests WHERE vault_id = ?", (vault.vault_id,))
+                    for row in cursor.fetchall():
+                        raw_users = json.loads(row["allowed_users"] or "[]")
+                        clean_set = {u.replace("user:", "").strip().lower() for u in raw_users}
+                        p_uid = principal.user_id.replace("user:", "").strip().lower()
+                        p_uname = principal.username.strip().lower()
+                        if p_uid in clean_set or p_uname in clean_set:
+                            manifest_res_ids.add(row["resource_id"])
+            except Exception:
+                pass
+
+            allowed_res_ids = granted_res_ids | manifest_res_ids
+
+            if resource_id:
+                if resource_id in allowed_res_ids:
+                    must_clauses.append({"key": "resource_id", "match": {"value": resource_id}})
+                else:
+                    # Explicit query on unshared resource -> fail closed
+                    must_clauses.append({"key": "resource_id", "match": {"value": "__UNAUTHORIZED_RESOURCE__"}})
+            else:
+                # Query without specific resource_id: strictly constrain to authorized resources
+                if not allowed_res_ids:
+                    must_clauses.append({"key": "resource_id", "match": {"value": "__NO_RESOURCES_GRANTED__"}})
+                elif len(allowed_res_ids) == 1:
+                    must_clauses.append({"key": "resource_id", "match": {"value": next(iter(allowed_res_ids))}})
+                else:
+                    must_clauses.append({"key": "resource_id", "match": {"any": sorted(list(allowed_res_ids))}})
 
         must_not_clauses: List[Dict[str, Any]] = [
             {"key": "deny_selector", "match": {"any": subjects}}
         ]
 
-        # 2. Selector Attenuation from Grants (§19, §20)
-        matching_grants = [g for g in usable_grants if g.vault_id == vault.vault_id]
+        # 3. Selector Attenuation from Grants (§19, §20)
         exclude_tags = set()
         for g in matching_grants:
             if g.selector:

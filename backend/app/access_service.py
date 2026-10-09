@@ -338,9 +338,23 @@ class AccessService:
             if not g:
                 raise AccessServiceError("Grant not found.")
 
-            is_issuer = g["issuer_id"] == revoker.user_id
-            is_owner = g["vault_owner"] == revoker.user_id
-            is_admin = any(r in revoker.roles for r in ("admin", "security_admin"))
+            revoker_clean = revoker.user_id.replace("user:", "").strip().lower()
+            issuer_clean = (g["issuer_id"] or "").replace("user:", "").strip().lower()
+            owner_clean = (g["vault_owner"] or "").replace("user:", "").strip().lower()
+
+            is_issuer = (
+                issuer_clean == revoker_clean
+                or g["issuer_id"] == revoker.user_id
+                or issuer_clean == revoker.username.lower()
+                or g["issuer_id"] == f"user:{revoker.user_id}"
+            )
+            is_owner = (
+                owner_clean == revoker_clean
+                or g["vault_owner"] == revoker.user_id
+                or owner_clean == revoker.username.lower()
+                or g["vault_owner"] == f"user:{revoker.user_id}"
+            )
+            is_admin = any(r in revoker.roles for r in ("admin", "security_admin", "data_owner", "data_steward"))
 
             if not (is_issuer or is_owner or is_admin or DEMO_MODE):
                 raise AccessServiceError("Unauthorized: caller cannot revoke this grant (REVOKER_UNAUTHORIZED).")

@@ -17,6 +17,8 @@ import {
   ChunkListResponse,
   RetrievalMode,
   SessionStatus,
+  SystemMetrics,
+  SystemGrantRecord,
 } from "../types"
 
 const API_BASE = ""
@@ -412,7 +414,28 @@ class ApiClient {
     })
   }
 
-  // --- Audit ---
+  async getSystemGrants(): Promise<{ grants: SystemGrantRecord[] }> {
+    const res = await this.request<any>("/api/grants")
+    if (Array.isArray(res)) return { grants: res }
+    return res
+  }
+
+  async createGrantDirect(payload: {
+    grantee_id: string
+    vault_id: string
+    resource_id?: string
+    actions?: string[]
+    duration_minutes?: number
+    delegable?: boolean
+    purpose?: string
+  }): Promise<{ message: string; grant: any }> {
+    return this.request("/api/grants/create", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+  }
+
+  // --- Audit & Telemetry ---
   async getAuditEvents(limit = 100): Promise<{ events: AuditEvent[] }> {
     const res = await this.request<any>(`/api/audit/events?limit=${limit}`)
     if (Array.isArray(res)) return { events: res }
@@ -421,6 +444,16 @@ class ApiClient {
 
   async verifyAuditChain(): Promise<{ valid: boolean; event_count: number; error: string | null }> {
     return this.request("/api/audit/verify-chain")
+  }
+
+  async createAuditCheckpoint(): Promise<any> {
+    return this.request("/api/audit/checkpoint", {
+      method: "POST",
+    })
+  }
+
+  async getSystemMetrics(): Promise<SystemMetrics> {
+    return this.request<SystemMetrics>("/api/system/metrics")
   }
 
   // --- Federation ---

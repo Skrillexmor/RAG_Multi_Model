@@ -39,7 +39,11 @@ import {
 import { toast } from "sonner"
 
 export const ChunkStoreView: React.FC = () => {
-  const { vaults, startNewChat } = useApp()
+  const { vaults, startNewChat, persona, principal } = useApp()
+
+  const isAdmin = (principal?.roles || persona.roles || []).some(
+    (r) => r === "admin" || r === "security_admin"
+  )
 
   const [chunks, setChunks] = useState<ChunkRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -179,6 +183,21 @@ export const ChunkStoreView: React.FC = () => {
             </Button>
           </div>
         </div>
+
+        {/* Role Scoped Banner */}
+        {!isAdmin && (
+          <div className="p-3 rounded-lg border border-border bg-surface-raised/40 text-xs flex items-center justify-between gap-2 mt-3">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+              <span>
+                Role-scoped view: Showing only chunks authorized for <strong className="text-foreground">{persona.name}</strong> (Clearance Level {persona.clearanceLevel}). Chunks from unshared documents are strictly withheld.
+              </span>
+            </div>
+            <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground shrink-0">
+              Isolated Storage
+            </Badge>
+          </div>
+        )}
 
         {/* Top Summary Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">

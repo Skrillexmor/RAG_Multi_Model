@@ -188,11 +188,18 @@ class TestSecurityMatrix:
             for g in grants:
                 sig = sign_grant_payload(g)
                 cursor.execute("""
-                INSERT OR IGNORE INTO grants (
+                INSERT INTO grants (
                     grant_id, vault_id, grantee_type, grantee_id, selector, actions,
                     valid_from, valid_until, purpose, delegable, depth, parent_grant_id,
                     issuer_id, state, signature, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+                ON CONFLICT(grant_id) DO UPDATE SET
+                    state = 'active',
+                    valid_from = excluded.valid_from,
+                    valid_until = excluded.valid_until,
+                    selector = excluded.selector,
+                    actions = excluded.actions,
+                    signature = excluded.signature
                 """, (
                     g["grant_id"], g["vault_id"], g["grantee_type"], g["grantee_id"],
                     json.dumps(g["selector"]), json.dumps(g["actions"]),
@@ -517,16 +524,9 @@ class TestSecurityMatrix:
         self.log("SCOPE-006", "Private Vaults Default Hidden", "Dataset Scope", passed, "Sensitive datasets do not broadcast existence to ungranted users.")
 
     def test_scope_007_explicit_grant_expands_scope(self):
+        self.ensure_fixtures()
         charlie = PolicyEngine.get_principal_by_username("charlie")
         usable = PolicyEngine.usable_grants(charlie, time_authority.now().timestamp)
-        if not any(g.vault_id == "v_alpha" for g in usable):
-            with db.get_connection() as conn:
-                conn.cursor().execute("""
-                    UPDATE grants SET state = 'active', valid_until = datetime('now', '+7 days')
-                    WHERE grantee_id = 'user:u_charlie' AND vault_id = 'v_alpha'
-                """)
-                conn.commit()
-            usable = PolicyEngine.usable_grants(charlie, time_authority.now().timestamp)
         vault = PolicyEngine.effective_scope("project-alpha", charlie, usable)
         passed = vault is not None
         self.log("SCOPE-007", "Explicit Grant Expands Scope for Grantee", "Dataset Scope", passed, "Charlie granted access via Alice's delegated grant.")

@@ -467,30 +467,32 @@ def list_vaults(principal: Principal = Depends(get_current_principal)):
 
                     for d in doc_rows:
                         res_id = d["resource_id"]
-                        # 1. Direct grant for this specific resource
+                        # 1. Direct active grant for this specific resource
                         if res_id in granted_res_ids:
                             accessible_docs.append(dict(d))
                             continue
 
-                        # 2. Folder-wide grant with clearance or explicit manifest access
-                        if has_all_folder_grant:
-                            if d["classification"] <= principal.clearance:
+                        cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
+                        m_row = cursor.fetchone()
+                        if not m_row:
+                            continue
+
+                        u_list = json.loads(m_row["allowed_users"] or "[]")
+                        clean_u_set = {u.replace("user:", "").strip().lower() for u in u_list}
+                        p_uid = principal.user_id.replace("user:", "").strip().lower()
+                        p_uname = principal.username.strip().lower()
+
+                        # 2. Explicit user ACL on resource manifest
+                        if p_uid in clean_u_set or p_uname in clean_u_set:
+                            accessible_docs.append(dict(d))
+                            continue
+
+                        # 3. Folder-wide grant: requires clearance and allowed roles
+                        if has_all_folder_grant and d["classification"] <= principal.clearance:
+                            r_list = json.loads(m_row["allowed_roles"] or "[]")
+                            if any(r in r_list or f"role:{r}" in r_list for r in principal.roles):
                                 accessible_docs.append(dict(d))
                                 continue
-
-                            # Check if user explicitly allowed in resource manifest
-                            cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
-                            m_row = cursor.fetchone()
-                            if m_row:
-                                u_list = json.loads(m_row["allowed_users"] or "[]")
-                                r_list = json.loads(m_row["allowed_roles"] or "[]")
-                                if (
-                                    principal.user_id in u_list
-                                    or f"user:{principal.user_id}" in u_list
-                                    or any(r in r_list or f"role:{r}" in r_list for r in principal.roles)
-                                ):
-                                    accessible_docs.append(dict(d))
-                                    continue
 
                 v_dict["documents"] = accessible_docs
                 v_dict["document_count"] = len(accessible_docs)
@@ -508,7 +510,10 @@ def get_vault_documents(vault_slug: str, principal: Principal = Depends(get_curr
     """Returns all documents ingested in a specific vault authorized for caller."""
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
-    vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
+    try:
+        vault = PolicyEngine.effective_scope(vault_slug, principal, usable)
+    except ScopeViolation:
+        return {"vault_slug": vault_slug, "documents": []}
     is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
     is_owner = vault.owner_id == principal.user_id
 
@@ -540,27 +545,32 @@ def get_vault_documents(vault_slug: str, principal: Principal = Depends(get_curr
 
             for d in doc_rows:
                 res_id = d["resource_id"]
+                # 1. Direct active grant for this specific resource
                 if res_id in granted_res_ids:
                     accessible_docs.append(dict(d))
                     continue
 
-                if has_all_folder_grant:
-                    if d["classification"] <= principal.clearance:
+                cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
+                m_row = cursor.fetchone()
+                if not m_row:
+                    continue
+
+                u_list = json.loads(m_row["allowed_users"] or "[]")
+                clean_u_set = {u.replace("user:", "").strip().lower() for u in u_list}
+                p_uid = principal.user_id.replace("user:", "").strip().lower()
+                p_uname = principal.username.strip().lower()
+
+                # 2. Explicit user ACL on resource manifest
+                if p_uid in clean_u_set or p_uname in clean_u_set:
+                    accessible_docs.append(dict(d))
+                    continue
+
+                # 3. Folder-wide grant: requires clearance and allowed roles
+                if has_all_folder_grant and d["classification"] <= principal.clearance:
+                    r_list = json.loads(m_row["allowed_roles"] or "[]")
+                    if any(r in r_list or f"role:{r}" in r_list for r in principal.roles):
                         accessible_docs.append(dict(d))
                         continue
-
-                    cursor.execute("SELECT allowed_users, allowed_roles FROM resource_manifests WHERE resource_id = ?", (res_id,))
-                    m_row = cursor.fetchone()
-                    if m_row:
-                        u_list = json.loads(m_row["allowed_users"] or "[]")
-                        r_list = json.loads(m_row["allowed_roles"] or "[]")
-                        if (
-                            principal.user_id in u_list
-                            or f"user:{principal.user_id}" in u_list
-                            or any(r in r_list or f"role:{r}" in r_list for r in principal.roles)
-                        ):
-                            accessible_docs.append(dict(d))
-                            continue
 
     return {"vault_slug": vault.slug, "documents": accessible_docs}
 
@@ -888,6 +898,15 @@ def assign_vault(vault_slug_or_id: str, body: AssignVaultRequest, principal: Pri
                 "parent_grant_id": None,
                 "issuer_id": principal.user_id
             }
+            # If assigning access to a specific resource, supersede previous active grants for this grantee and resource
+            if body.resource_id:
+                cursor.execute("""
+                    UPDATE grants
+                    SET state = 'superseded', revoked_at = ?, revoked_by = ?, revoke_reason = 'superseded_by_new_grant'
+                    WHERE vault_id = ? AND grantee_id = ? AND state = 'active'
+                      AND selector LIKE ?
+                """, (now_iso, principal.user_id, vid, grantee_formatted, f'%{body.resource_id}%'))
+
             sig = sign_grant_payload(grant_dict)
             cursor.execute("""
                 INSERT INTO grants (
@@ -1072,6 +1091,68 @@ def list_chunks(
             where_clauses.append("c.classification <= ?")
             params.append(principal.clearance)
 
+            # Determine strictly accessible resource IDs for non-admin
+            p_uid = principal.user_id.replace("user:", "").strip().lower()
+            p_uname = principal.username.strip().lower()
+
+            v_ph = ",".join(["?"] * len(accessible_vault_ids))
+            cursor.execute(f"""
+                SELECT r.resource_id, r.vault_id, r.classification, v.owner_id,
+                       m.allowed_users, m.allowed_roles
+                FROM resources r
+                JOIN vaults v ON r.vault_id = v.vault_id
+                LEFT JOIN resource_manifests m ON r.resource_id = m.resource_id
+                WHERE r.vault_id IN ({v_ph}) AND r.status != 'deleted'
+            """, accessible_vault_ids)
+            doc_rows = cursor.fetchall()
+            allowed_resource_ids = set()
+
+            for d in doc_rows:
+                res_id = d["resource_id"]
+                v_id = d["vault_id"]
+                v_owner = (d["owner_id"] or "").replace("user:", "").strip().lower()
+
+                # 1. Vault owner has full access up to clearance
+                if v_owner in (p_uid, p_uname) and d["classification"] <= principal.clearance:
+                    allowed_resource_ids.add(res_id)
+                    continue
+
+                # 2. Specific active grant for this resource
+                if any(g.vault_id == v_id and g.selector and g.selector.get("resource_id") == res_id for g in usable):
+                    allowed_resource_ids.add(res_id)
+                    continue
+
+                # 3. Explicit user ACL in manifest
+                u_list = json.loads(d["allowed_users"] or "[]")
+                clean_u = {u.replace("user:", "").strip().lower() for u in u_list}
+                if (p_uid in clean_u or p_uname in clean_u) and d["classification"] <= principal.clearance:
+                    allowed_resource_ids.add(res_id)
+                    continue
+
+                # 4. Folder-wide grant with clearance and allowed roles
+                has_folder_grant = any(
+                    g.vault_id == v_id and (not g.selector or not g.selector.get("resource_id") or g.selector.get("all") is True)
+                    for g in usable
+                )
+                if has_folder_grant and d["classification"] <= principal.clearance:
+                    r_list = json.loads(d["allowed_roles"] or "[]")
+                    if any(r in r_list or f"role:{r}" in r_list for r in principal.roles):
+                        allowed_resource_ids.add(res_id)
+                        continue
+
+            if not allowed_resource_ids:
+                return {
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "chunks": [],
+                    "stats": {"total_chunks": 0, "total_encrypted": 0, "modalities": {}}
+                }
+
+            r_placeholders = ",".join(["?"] * len(allowed_resource_ids))
+            where_clauses.append(f"c.resource_id IN ({r_placeholders})")
+            params.extend(list(allowed_resource_ids))
+
         if resource_id:
             where_clauses.append("c.resource_id = ?")
             params.append(resource_id)
@@ -1190,15 +1271,22 @@ def list_chunks(
                 "created_at": row["created_at"],
             })
 
-        # Calculate modality counts across accessible vaults
-        stats_placeholders = ",".join(["?"] * len(accessible_vault_ids))
-        cursor.execute(f"""
+        # Calculate modality counts across accessible resources
+        stats_where = [f"c.vault_id IN ({stats_placeholders})"]
+        stats_params = list(accessible_vault_ids)
+        if not is_admin:
+            stats_where.append("c.classification <= ?")
+            stats_params.append(principal.clearance)
+            stats_where.append(f"c.resource_id IN ({r_placeholders})")
+            stats_params.extend(list(allowed_resource_ids))
+        stats_sql = f"""
             SELECT r.resource_type, COUNT(*) as c
             FROM chunks c
             JOIN resources r ON c.resource_id = r.resource_id
-            WHERE c.vault_id IN ({stats_placeholders})
+            WHERE {" AND ".join(stats_where)}
             GROUP BY r.resource_type
-        """, accessible_vault_ids)
+        """
+        cursor.execute(stats_sql, stats_params)
         stats_rows = cursor.fetchall()
         mod_counts = {r["resource_type"].lower(): r["c"] for r in stats_rows}
 
@@ -1784,17 +1872,269 @@ def revoke_grant(grant_id: str, body: Optional[Dict[str, Any]] = None, principal
     except AccessServiceError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
-@app.get("/api/me/grants")
-def get_my_grants(principal: Principal = Depends(get_current_principal)):
+# ----------------- ACCESS GRANTS CONSOLE ENDPOINTS -----------------
+class CreateGrantDirectRequest(BaseModel):
+    grantee_id: str
+    vault_id: str
+    resource_id: Optional[str] = None
+    actions: Optional[List[str]] = ["read"]
+    duration_minutes: Optional[int] = 60
+    delegable: Optional[bool] = False
+    purpose: Optional[str] = "Manual Grant via Access Console"
+
+@app.get("/api/grants")
+def list_system_grants(principal: Principal = Depends(get_current_principal)):
+    """
+    Returns grants with rich metadata (vault name, document title, status, issuer).
+    Role-scoped: Admins see all grants; standard users see grants for their vaults or issued to/by them.
+    """
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+    p_clean = principal.user_id.replace("user:", "").strip().lower()
+    p_uname = principal.username.strip().lower()
+
     now = time_authority.now()
-    usable = PolicyEngine.usable_grants(principal, now.timestamp)
-    return {"grants": usable}
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        if is_admin:
+            cursor.execute("""
+                SELECT g.*, v.slug as vault_slug, v.display_name as vault_name, v.owner_id as vault_owner
+                FROM grants g
+                JOIN vaults v ON g.vault_id = v.vault_id
+                ORDER BY g.created_at DESC
+            """)
+        else:
+            cursor.execute("""
+                SELECT g.*, v.slug as vault_slug, v.display_name as vault_name, v.owner_id as vault_owner
+                FROM grants g
+                JOIN vaults v ON g.vault_id = v.vault_id
+                WHERE v.owner_id IN (?, ?, ?)
+                   OR g.grantee_id IN (?, ?, ?)
+                   OR g.issuer_id IN (?, ?, ?)
+                ORDER BY g.created_at DESC
+            """, (p_clean, f"user:{p_clean}", p_uname, p_clean, f"user:{p_clean}", p_uname, p_clean, f"user:{p_clean}", p_uname))
+        
+        rows = cursor.fetchall()
+        grants_out = []
+        res_cache = {}
+
+        for r in rows:
+            g_dict = dict(r)
+            sel_dict = {}
+            if g_dict.get("selector"):
+                try:
+                    sel_dict = json.loads(g_dict["selector"]) if isinstance(g_dict["selector"], str) else g_dict["selector"]
+                except Exception:
+                    sel_dict = {}
+
+            target_res_id = sel_dict.get("resource_id")
+            target_res_title = None
+            if target_res_id:
+                if target_res_id not in res_cache:
+                    cursor.execute("SELECT title FROM resources WHERE resource_id = ?", (target_res_id,))
+                    res_row = cursor.fetchone()
+                    res_cache[target_res_id] = res_row["title"] if res_row else target_res_id
+                target_res_title = res_cache[target_res_id]
+
+            acts = []
+            if g_dict.get("actions"):
+                try:
+                    acts = json.loads(g_dict["actions"]) if isinstance(g_dict["actions"], str) else [g_dict["actions"]]
+                except Exception:
+                    acts = ["read"]
+
+            valid_until_str = g_dict.get("valid_until") or ""
+            is_expired = False
+            if valid_until_str:
+                try:
+                    v_dt = datetime.fromisoformat(valid_until_str.replace("Z", "+00:00"))
+                    if v_dt.tzinfo is None:
+                        v_dt = v_dt.replace(tzinfo=timezone.utc)
+                    is_expired = (v_dt < now.timestamp)
+                except Exception:
+                    pass
+
+            state = g_dict.get("state", "active")
+            if state != "revoked" and is_expired:
+                state = "expired"
+
+            clean_grantee = g_dict.get("grantee_id", "").replace("user:", "")
+            clean_issuer = g_dict.get("issuer_id", "").replace("user:", "")
+
+            grants_out.append({
+                "grant_id": g_dict["grant_id"],
+                "vault_id": g_dict["vault_id"],
+                "vault_slug": g_dict.get("vault_slug", ""),
+                "vault_name": g_dict.get("vault_name", g_dict["vault_id"]),
+                "grantee_type": g_dict.get("grantee_type", "user"),
+                "grantee_id": g_dict["grantee_id"],
+                "grantee_username": clean_grantee,
+                "issuer_id": clean_issuer,
+                "actions": acts,
+                "selector": sel_dict,
+                "resource_id": target_res_id,
+                "resource_title": target_res_title,
+                "valid_from": g_dict.get("valid_from", ""),
+                "valid_until": valid_until_str,
+                "delegable": bool(g_dict.get("delegable", 0)),
+                "revoked": (g_dict.get("state") == "revoked"),
+                "revocation_reason": g_dict.get("revoke_reason"),
+                "is_expired": is_expired,
+                "state": state,
+                "purpose": g_dict.get("purpose", ""),
+                "signature": g_dict.get("signature", ""),
+            })
+
+    return {"grants": grants_out}
+
+@app.post("/api/grants/create")
+def create_grant_direct(body: CreateGrantDirectRequest, principal: Principal = Depends(get_current_principal)):
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+    vault = db.get_vault(body.vault_id) or db.get_vault_by_slug(body.vault_id)
+    if not vault:
+        raise HTTPException(status_code=404, detail="Target vault not found.")
+    
+    p_clean = principal.user_id.replace("user:", "").strip().lower()
+    p_uname = principal.username.strip().lower()
+    v_owner = (vault.owner_id or "").replace("user:", "").strip().lower()
+
+    if not is_admin and v_owner not in (p_clean, p_uname):
+        now_ts = time_authority.now().timestamp
+        usable = PolicyEngine.usable_grants(principal, now_ts)
+        has_delegable = any(g.vault_id == vault.vault_id and g.delegable for g in usable)
+        if not has_delegable:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only vault owners, admins, or delegable grant holders can issue grants.")
+
+    clean_grantee = body.grantee_id.replace("user:", "").strip()
+    target_res = body.resource_id.strip() if body.resource_id else None
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT grant_id, selector FROM grants WHERE vault_id = ? AND grantee_id IN (?, ?) AND state = 'active'", (vault.vault_id, clean_grantee, f"user:{clean_grantee}"))
+        for old_g in cursor.fetchall():
+            try:
+                old_sel = json.loads(old_g["selector"] or "{}")
+                if old_sel.get("resource_id") == target_res or (not target_res and old_sel.get("all") is True):
+                    cursor.execute("UPDATE grants SET state = 'revoked', revoked_at = ?, revoked_by = ?, revoke_reason = 'Superseded by new grant' WHERE grant_id = ?",
+                                   (datetime.now(timezone.utc).isoformat(), principal.user_id, old_g["grant_id"]))
+            except Exception:
+                pass
+        conn.commit()
+
+    duration = max(1, body.duration_minutes or 60)
+    valid_from = time_authority.now().timestamp
+    valid_until = valid_from + timedelta(minutes=duration)
+    selector = {"resource_id": target_res} if target_res else {"all": True}
+
+    new_grant = access_service.issue_grant(
+        issuer=principal,
+        grantee_id=clean_grantee,
+        vault_id=vault.vault_id,
+        actions=body.actions or ["read"],
+        valid_until=valid_until,
+        selector=selector,
+        delegable=bool(body.delegable),
+        purpose=body.purpose or "Manual grant via Access Console"
+    )
+
+    if target_res:
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT allowed_users FROM resource_manifests WHERE resource_id = ?", (target_res,))
+            m_row = cursor.fetchone()
+            if m_row:
+                cur_users = json.loads(m_row["allowed_users"] or "[]")
+                if clean_grantee not in cur_users and f"user:{clean_grantee}" not in cur_users:
+                    cur_users.append(f"user:{clean_grantee}")
+                    cursor.execute("UPDATE resource_manifests SET allowed_users = ? WHERE resource_id = ?", (json.dumps(cur_users), target_res))
+                    conn.commit()
+
+    return {"message": "Grant created successfully", "grant": new_grant}
+
+# ----------------- SYSTEM TELEMETRY & HARDWARE METRICS -----------------
+@app.get("/api/system/metrics")
+def get_system_metrics(principal: Principal = Depends(get_current_principal)):
+    import psutil
+    import os
+    import sys
+    import platform
+    import time
+
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage(".")
+    cpu_percent = psutil.cpu_percent(interval=None)
+    cpu_cores = psutil.cpu_count(logical=True)
+    cpu_freq = psutil.cpu_freq()
+    
+    proc = psutil.Process()
+    proc_mem = proc.memory_info()
+    proc_uptime_sec = time.time() - proc.create_time()
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as c FROM chunks")
+        total_chunks = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) as c FROM resources WHERE status != 'deleted'")
+        total_resources = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) as c FROM vaults WHERE status = 'active'")
+        total_vaults = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) as c FROM audit_events")
+        total_audit_events = cursor.fetchone()["c"]
+        cursor.execute("SELECT COUNT(*) as c FROM grants WHERE state = 'active'")
+        active_grants = cursor.fetchone()["c"]
+        cursor.execute("SELECT decision, COUNT(*) as c FROM audit_events GROUP BY decision")
+        decisions = {row["decision"]: row["c"] for row in cursor.fetchall()}
+
+    db_path = Path("data/secure_rag.db")
+    db_size_mb = round(db_path.stat().st_size / (1024 * 1024), 2) if db_path.exists() else 0.0
+
+    return {
+        "hardware": {
+            "ram_total_gb": round(mem.total / (1024**3), 2),
+            "ram_used_gb": round(mem.used / (1024**3), 2),
+            "ram_percent": mem.percent,
+            "cpu_percent": cpu_percent,
+            "cpu_cores": cpu_cores,
+            "cpu_freq_mhz": round(cpu_freq.current, 1) if cpu_freq else None,
+            "disk_total_gb": round(disk.total / (1024**3), 2),
+            "disk_used_gb": round(disk.used / (1024**3), 2),
+            "disk_percent": disk.percent,
+        },
+        "process": {
+            "pid": os.getpid(),
+            "python_version": sys.version.split()[0],
+            "platform": f"{platform.system()} {platform.release()}",
+            "process_rss_mb": round(proc_mem.rss / (1024 * 1024), 2),
+            "uptime_seconds": round(proc_uptime_sec),
+            "egress_mode": "AIR-GAPPED (Zero-External-Egress)",
+        },
+        "storage": {
+            "db_size_mb": db_size_mb,
+            "total_chunks": total_chunks,
+            "total_resources": total_resources,
+            "total_vaults": total_vaults,
+            "active_grants": active_grants,
+        },
+        "security": {
+            "total_events": total_audit_events,
+            "permits": decisions.get("PERMIT", 0),
+            "denies": decisions.get("DENY", 0),
+            "permit_rate": round(decisions.get("PERMIT", 0) / max(total_audit_events, 1) * 100, 1),
+            "deny_rate": round(decisions.get("DENY", 0) / max(total_audit_events, 1) * 100, 1),
+        }
+    }
 
 # ----------------- AUDIT & CHECKPOINTS (§71, §73) -----------------
 @app.get("/api/audit/events")
 def get_audit_events(limit: int = 50, principal: Principal = Depends(get_current_principal)):
     """Audit trail endpoint: allows authenticated system inspection of cryptographic events (§73)."""
-    return {"events": audit_service.get_recent_events(limit)}
+    is_audit_admin = any(r in principal.roles for r in ("admin", "security_admin", "auditor"))
+    if is_audit_admin:
+        return {"events": audit_service.get_recent_events(limit)}
+    else:
+        clean_id = principal.user_id.replace("user:", "").strip()
+        actor_ids = [clean_id, f"user:{clean_id}", principal.username]
+        return {"events": audit_service.get_recent_events_for_actors(actor_ids, limit=limit)}
 
 @app.get("/api/audit/verify-chain")
 def verify_audit_chain(principal: Principal = Depends(get_current_principal)):

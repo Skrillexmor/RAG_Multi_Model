@@ -47,6 +47,7 @@ export const Composer: React.FC<ComposerProps> = ({
     selectedVault,
     setSelectedVault,
     persona,
+    principal,
     selectedTargetFile,
     setSelectedTargetFile,
   } = useApp()
@@ -65,6 +66,16 @@ export const Composer: React.FC<ComposerProps> = ({
   const [vaultDocs, setVaultDocs] = useState<VaultDocument[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  const currentUserId = principal?.user_id || principal?.username || persona.username
+  const isOwner = selectedVault
+    ? selectedVault.owner_id === currentUserId ||
+      selectedVault.owner_id === `user:${currentUserId}` ||
+      selectedVault.owner_id === persona.username
+    : false
+  const isAdmin = (principal?.roles || persona.roles || []).some(
+    (r) => r === "admin" || r === "security_admin"
+  )
+
   // Fetch documents for the selected vault
   useEffect(() => {
     if (!selectedVault) {
@@ -72,19 +83,30 @@ export const Composer: React.FC<ComposerProps> = ({
       return
     }
 
+    const applyDocs = (docs: VaultDocument[]) => {
+      setVaultDocs(docs)
+      // If user is not the vault owner and not an admin, and has access to only 1 document,
+      // auto-select that document as the query scope target
+      if (!isOwner && !isAdmin && docs.length === 1) {
+        if (!selectedTargetFile || selectedTargetFile.id !== docs[0].resource_id) {
+          setSelectedTargetFile({ id: docs[0].resource_id, name: docs[0].title })
+        }
+      }
+    }
+
     if (selectedVault.documents && selectedVault.documents.length > 0) {
-      setVaultDocs(selectedVault.documents)
+      applyDocs(selectedVault.documents)
     } else {
       api
         .getVaultDocuments(selectedVault.slug)
         .then((res) => {
-          setVaultDocs(res.documents || [])
+          applyDocs(res.documents || [])
         })
         .catch(() => {
           setVaultDocs([])
         })
     }
-  }, [selectedVault])
+  }, [selectedVault, persona, principal, isOwner, isAdmin])
 
   // Auto resize textarea
   useEffect(() => {
@@ -277,7 +299,11 @@ export const Composer: React.FC<ComposerProps> = ({
                     <Layers className="h-3 w-3 text-emerald-400 shrink-0" />
                   )}
                   <span className="truncate max-w-[140px]">
-                    {selectedTargetFile ? selectedTargetFile.name : "All Files in Folder"}
+                    {selectedTargetFile
+                      ? selectedTargetFile.name
+                      : selectedVault && !isOwner && !isAdmin && vaultDocs.length > 0
+                      ? `All Accessible (${vaultDocs.length})`
+                      : "All Files in Folder"}
                   </span>
                   <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
                 </button>
@@ -290,7 +316,11 @@ export const Composer: React.FC<ComposerProps> = ({
                 >
                   <div className="flex items-center gap-2">
                     <Layers className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>All Files in Folder</span>
+                    <span>
+                      {selectedVault && !isOwner && !isAdmin && vaultDocs.length > 0
+                        ? `All Accessible Files (${vaultDocs.length})`
+                        : "All Files in Folder"}
+                    </span>
                   </div>
                   {!selectedTargetFile && (
                     <Badge variant="success" className="text-[9px] py-0 px-1">

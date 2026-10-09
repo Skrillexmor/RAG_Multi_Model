@@ -240,7 +240,8 @@ class PolicyEngine:
         manifest: ResourceManifest,
         usable_grants: List[Grant],
         purpose: str = "project_analysis",
-        selector: Optional[Dict[str, Any]] = None
+        selector: Optional[Dict[str, Any]] = None,
+        vault: Optional[Vault] = None
     ) -> Tuple[Literal["ALLOW", "DENY", "REDACT"], str, List[str]]:
         """
         Evaluates RBAC + ABAC + Grants with fail-closed default and explicit deny wins (§6).
@@ -280,17 +281,63 @@ class PolicyEngine:
             matched_rules.append(f"Grant:{g.grant_id}")
             return "ALLOW", f"Authorized via Grant {g.grant_id}", matched_rules
 
-        # 3. Direct ACL on Resource Manifest
-        allowed_roles = set(f"role:{r}" if not r.startswith("role:") else r for r in manifest.allowed_roles)
-        allowed_users = set(f"user:{u}" if not u.startswith("user:") else u for u in manifest.allowed_users)
+        # 3. Direct User ACL on Resource Manifest
+        allowed_users = set()
+        for u in manifest.allowed_users:
+            u_clean = u.replace("user:", "").strip().lower()
+            allowed_users.add(u_clean)
+            allowed_users.add(f"user:{u_clean}")
 
-        if subjects.intersection(allowed_users):
+        p_uid_clean = principal.user_id.replace("user:", "").strip().lower()
+        p_uname_clean = principal.username.strip().lower()
+        if (
+            p_uid_clean in allowed_users
+            or f"user:{p_uid_clean}" in allowed_users
+            or p_uname_clean in allowed_users
+            or subjects.intersection(allowed_users)
+        ):
             matched_rules.append("ManifestUserACL")
             return "ALLOW", "Authorized via resource user ACL", matched_rules
 
+        # 4. Role ACL on Resource Manifest
+        allowed_roles = set(f"role:{r}" if not r.startswith("role:") else r for r in manifest.allowed_roles)
         if subjects.intersection(allowed_roles):
-            matched_rules.append("ManifestRoleACL")
-            return "ALLOW", "Authorized via resource role ACL", matched_rules
+            # Resolve vault owner and determine authorization tier (§4, §32)
+            vault_owner_id = vault.owner_id if vault else None
+            if not vault_owner_id:
+                try:
+                    with db.get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT owner_id FROM vaults WHERE vault_id = ?", (manifest.vault_id,))
+                        v_row = cursor.fetchone()
+                        if v_row:
+                            vault_owner_id = v_row["owner_id"]
+                except Exception:
+                    pass
+
+            v_owner_clean = (vault_owner_id or "").replace("user:", "").strip().lower()
+            is_owner = (p_uid_clean == v_owner_clean or p_uname_clean == v_owner_clean)
+            is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+
+            # Vault owners and admins have direct authority over manifest roles
+            if is_owner or is_admin:
+                matched_rules.append("ManifestRoleACL")
+                return "ALLOW", "Authorized via resource role ACL", matched_rules
+
+            # Non-owner, non-admin callers CAN ONLY rely on role ACL if they hold a folder-wide grant!
+            # If they hold only specific resource grants, unshared files are strictly DENIED!
+            has_folder_wide_grant = any(
+                g.vault_id == manifest.vault_id and (
+                    not g.selector or g.selector.get("all") is True or 
+                    (not g.selector.get("resource_id") and not g.selector.get("include_tags"))
+                )
+                for g in usable_grants
+            )
+            if has_folder_wide_grant:
+                matched_rules.append("FolderGrantRoleACL")
+                return "ALLOW", "Authorized via folder-wide grant and resource role ACL", matched_rules
+
+            return "DENY", "Resource not shared: caller lacks specific grant or folder-wide access", []
 
         return "DENY", "No applicable allow rule or active grant matched", []
 

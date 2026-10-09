@@ -15,6 +15,12 @@ import {
   Edit2,
   Check,
   MoreVertical,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  Music as MusicIcon,
+  Code2,
+  Sparkles,
+  Layers,
 } from "lucide-react"
 import { useApp } from "../../context/AppContext"
 import { Conversation } from "../../types"
@@ -78,9 +84,77 @@ export const Sidebar: React.FC = () => {
     setEditingId(null)
   }
 
+  const getConversationVisual = (conv: Conversation) => {
+    const fileName = conv.selectedFileName?.toLowerCase() || ""
+    if (fileName.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/)) {
+      return {
+        Icon: ImageIcon,
+        badgeBg: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
+        fileColor: "text-amber-400",
+        label: "Image",
+      }
+    }
+    if (fileName.match(/\.(mp4|mov|avi|mkv|webm)$/)) {
+      return {
+        Icon: VideoIcon,
+        badgeBg: "bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30",
+        fileColor: "text-fuchsia-400",
+        label: "Video",
+      }
+    }
+    if (fileName.match(/\.(mp3|wav|ogg|m4a|flac)$/)) {
+      return {
+        Icon: MusicIcon,
+        badgeBg: "bg-rose-500/15 text-rose-400 border border-rose-500/30",
+        fileColor: "text-rose-400",
+        label: "Audio",
+      }
+    }
+    if (fileName.match(/\.(py|ts|js|jsx|tsx|html|css|json|sql|sh)$/)) {
+      return {
+        Icon: Code2,
+        badgeBg: "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30",
+        fileColor: "text-cyan-400",
+        label: "Code",
+      }
+    }
+    if (fileName.match(/\.(pdf|docx|doc|txt|md|csv|xlsx|pptx)$/)) {
+      return {
+        Icon: FileText,
+        badgeBg: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
+        fileColor: "text-emerald-400",
+        label: "Document",
+      }
+    }
+    if (conv.selectedFileName) {
+      return {
+        Icon: FileText,
+        badgeBg: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
+        fileColor: "text-emerald-400",
+        label: "File",
+      }
+    }
+    if (conv.vaultSlug) {
+      return {
+        Icon: Layers,
+        badgeBg: "bg-indigo-500/15 text-indigo-400 border border-indigo-500/30",
+        fileColor: "text-indigo-400",
+        label: "Folder",
+      }
+    }
+    return {
+      Icon: Sparkles,
+      badgeBg: "bg-sky-500/15 text-sky-400 border border-sky-500/30",
+      fileColor: "text-sky-400",
+      label: "General",
+    }
+  }
+
   const renderConversationItem = (conv: Conversation) => {
     const isActive = activeConversationId === conv.id && currentView === "chat"
     const isEditing = editingId === conv.id
+    const visual = getConversationVisual(conv)
+    const ItemIcon = visual.Icon
 
     if (sidebarCollapsed) {
       return (
@@ -90,17 +164,19 @@ export const Sidebar: React.FC = () => {
               onClick={() => selectConversation(conv.id)}
               className={`w-9 h-9 mx-auto rounded-md flex items-center justify-center transition-colors mb-1 ${
                 isActive
-                  ? "bg-secondary text-foreground font-medium"
+                  ? "bg-secondary text-foreground font-medium ring-1 ring-border"
                   : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
               }`}
             >
-              <MessageSquare className="h-4 w-4" />
+              <ItemIcon className="h-4 w-4" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">
             <p className="font-medium text-xs">{conv.title}</p>
             {conv.selectedFileName ? (
-              <p className="text-[10px] text-emerald-400 font-mono">📄 {conv.selectedFileName}</p>
+              <p className={`text-[10px] font-mono ${visual.fileColor}`}>
+                {visual.label}: {conv.selectedFileName}
+              </p>
             ) : (
               <p className="text-[10px] text-muted-foreground">{conv.vaultSlug} · All files</p>
             )}
@@ -112,24 +188,30 @@ export const Sidebar: React.FC = () => {
     return (
       <div
         key={conv.id}
-        className={`group relative flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors mb-0.5 cursor-pointer ${
+        className={`group relative flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors mb-1 cursor-pointer ${
           isActive
-            ? "bg-secondary text-foreground font-medium"
+            ? "bg-secondary/90 text-foreground font-medium shadow-xs ring-1 ring-border/50"
             : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
         }`}
         onClick={() => {
           if (!isEditing) selectConversation(conv.id)
         }}
       >
-        <div className="flex items-center gap-2 min-w-0 flex-1 mr-1">
-          {conv.pinned ? (
-            <Pin className="h-3 w-3 text-emerald-400 shrink-0 mt-0.5" />
-          ) : (
-            <MessageSquare className="h-3 w-3 shrink-0 opacity-70 mt-0.5" />
-          )}
+        <div className="flex items-start gap-2.5 min-w-0 flex-1 mr-1">
+          {/* Distinct Visual Avatar Badge */}
+          <div
+            className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${visual.badgeBg}`}
+            title={visual.label}
+          >
+            {conv.pinned ? (
+              <Pin className="h-3 w-3 text-emerald-400" />
+            ) : (
+              <ItemIcon className="h-3.5 w-3.5" />
+            )}
+          </div>
 
           {isEditing ? (
-            <div className="flex items-center gap-1 flex-1" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
               <input
                 type="text"
                 value={editTitle}
@@ -143,22 +225,22 @@ export const Sidebar: React.FC = () => {
               />
               <button
                 onClick={() => handleSaveRename(conv.id)}
-                className="text-emerald-400 hover:text-emerald-300"
+                className="text-emerald-400 hover:text-emerald-300 p-0.5"
               >
                 <Check className="h-3.5 w-3.5" />
               </button>
             </div>
           ) : (
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="truncate leading-snug">{conv.title}</span>
-              <div className="flex items-center gap-1 text-[10px] mt-0.5">
+            <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+              <span className="truncate text-[12px] font-medium leading-snug">{conv.title}</span>
+              <div className="flex items-center gap-1 text-[10px] mt-0.5 text-muted-foreground">
                 {conv.selectedFileName ? (
-                  <span className="flex items-center gap-1 text-emerald-400 font-mono truncate font-medium">
-                    <FileText className="h-2.5 w-2.5 shrink-0" />
-                    {conv.selectedFileName}
+                  <span className={`flex items-center gap-1 font-mono truncate ${visual.fileColor} font-medium`}>
+                    <ItemIcon className="h-2.5 w-2.5 shrink-0" />
+                    <span className="truncate">{conv.selectedFileName}</span>
                   </span>
                 ) : (
-                  <span className="text-muted-foreground/60 truncate font-mono">
+                  <span className="truncate font-mono opacity-70">
                     {conv.vaultSlug} · All files
                   </span>
                 )}
@@ -167,31 +249,35 @@ export const Sidebar: React.FC = () => {
           )}
         </div>
 
-        {/* Action Menu */}
+        {/* Action Menu (Anchored, Never Squashed) */}
         {!isEditing && (
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+          <div
+            className="shrink-0 z-20 flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity ml-1"
+            onClick={(e) => e.stopPropagation()}
+          >
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  onClick={(e) => e.stopPropagation()}
-                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                  type="button"
+                  className="p-1.5 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground transition-colors border border-transparent hover:border-border/60 shadow-xs"
+                  aria-label="Conversation options"
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuContent align="end" className="w-36 text-xs">
                 <DropdownMenuItem
                   onClick={() => pinConversation(conv.id)}
                   className="text-xs cursor-pointer"
                 >
-                  <Pin className="h-3.5 w-3.5 mr-2" />
+                  <Pin className="h-3.5 w-3.5 mr-2 text-emerald-400" />
                   {conv.pinned ? "Unpin" : "Pin"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => handleStartRename(conv)}
                   className="text-xs cursor-pointer"
                 >
-                  <Edit2 className="h-3.5 w-3.5 mr-2" />
+                  <Edit2 className="h-3.5 w-3.5 mr-2 text-sky-400" />
                   Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem

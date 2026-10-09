@@ -168,4 +168,19 @@ class AuditService:
             cursor.execute("SELECT * FROM audit_events ORDER BY event_id DESC LIMIT ?", (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
+    @classmethod
+    def get_recent_events_for_actors(cls, actor_ids: List[str], limit: int = 50) -> List[Dict[str, Any]]:
+        if not actor_ids:
+            return []
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+            placeholders = ",".join(["?"] * len(actor_ids))
+            cursor.execute(f"""
+                SELECT * FROM audit_events 
+                WHERE actor_id IN ({placeholders})
+                ORDER BY event_id DESC LIMIT ?
+            """, (*actor_ids, limit))
+            return [dict(row) for row in cursor.fetchall()]
+
 audit_service = AuditService()
+

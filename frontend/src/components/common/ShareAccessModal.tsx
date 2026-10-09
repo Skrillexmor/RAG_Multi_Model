@@ -138,6 +138,7 @@ export const ShareAccessModal: React.FC<ShareAccessModalProps> = ({
       // Optimistically update active members
       setActiveMembers((prev) => prev.filter((m) => m.grant_id !== grantId))
       onSuccess?.()
+      await loadData()
     } catch (err: any) {
       toast.error(`Failed to revoke grant: ${err.message}`)
     } finally {

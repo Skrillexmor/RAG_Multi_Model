@@ -197,7 +197,7 @@ export interface AuditEvent {
   action: string
   object_type: string
   object_id: string
-  decision: "ALLOW" | "DENY"
+  decision: "ALLOW" | "DENY" | "PERMIT" | string
   reason_code: string
   policy_version: number
   prev_hash: string
@@ -360,3 +360,64 @@ export interface ChunkListResponse {
     modalities: Record<string, number>
   }
 }
+
+export interface SystemMetrics {
+  hardware: {
+    ram_total_gb: number
+    ram_used_gb: number
+    ram_percent: number
+    cpu_percent: number
+    cpu_cores: number
+    cpu_freq_mhz?: number
+    disk_total_gb: number
+    disk_used_gb: number
+    disk_percent: number
+  }
+  process: {
+    pid: number
+    python_version: string
+    platform: string
+    process_rss_mb: number
+    uptime_seconds: number
+    egress_mode: string
+  }
+  storage: {
+    db_size_mb: number
+    total_chunks: number
+    total_resources: number
+    total_vaults: number
+    active_grants: number
+  }
+  security: {
+    total_events: number
+    permits: number
+    denies: number
+    permit_rate: number
+    deny_rate: number
+  }
+}
+
+export interface SystemGrantRecord {
+  grant_id: string
+  vault_id: string
+  vault_slug?: string
+  vault_name?: string
+  grantee_type?: string
+  grantee_id: string
+  grantee_username?: string
+  issuer_id: string
+  actions: string[]
+  selector?: any
+  resource_id?: string | null
+  resource_title?: string | null
+  valid_from: string
+  valid_until: string
+  delegable: boolean
+  revoked: boolean
+  revocation_reason?: string | null
+  is_expired?: boolean
+  state: "active" | "revoked" | "expired"
+  purpose?: string
+  signature?: string
+}
+

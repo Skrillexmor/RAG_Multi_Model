@@ -116,7 +116,8 @@ class CanonicalGate:
                     principal=principal,
                     action=ACTION_RETRIEVE_EVIDENCE,
                     manifest=manifest,
-                    usable_grants=usable_grants
+                    usable_grants=usable_grants,
+                    vault=vault
                 )
 
                 if decision != "ALLOW":
@@ -127,8 +128,9 @@ class CanonicalGate:
                 matching_grant = None
                 for g in usable_grants:
                     if g.vault_id == vault.vault_id and ACTION_RETRIEVE_EVIDENCE in g.actions:
-                        matching_grant = g
-                        break
+                        if PolicyEngine.matches_selector(g.selector, manifest):
+                            matching_grant = g
+                            break
 
                 grant_id = matching_grant.grant_id if matching_grant else "direct_acl"
                 grant_chain = [grant_id]

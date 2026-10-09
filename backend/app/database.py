@@ -424,6 +424,22 @@ class Database:
             revoked_ids = []
             queue = [root_grant_id]
 
+            # Also queue any existing active grants for the same grantee and resource in this vault
+            cursor.execute("SELECT vault_id, grantee_id, selector FROM grants WHERE grant_id = ?", (root_grant_id,))
+            root_info = cursor.fetchone()
+            if root_info and root_info["selector"]:
+                sel = json.loads(root_info["selector"]) if isinstance(root_info["selector"], str) else root_info["selector"]
+                res_id = sel.get("resource_id") if isinstance(sel, dict) else None
+                if res_id:
+                    cursor.execute("""
+                        SELECT grant_id FROM grants
+                        WHERE vault_id = ? AND grantee_id = ? AND state = 'active'
+                          AND selector LIKE ?
+                    """, (root_info["vault_id"], root_info["grantee_id"], f'%{res_id}%'))
+                    for extra_row in cursor.fetchall():
+                        if extra_row["grant_id"] not in queue:
+                            queue.append(extra_row["grant_id"])
+
             while queue:
                 curr_id = queue.pop(0)
                 revoked_ids.append(curr_id)
@@ -446,17 +462,26 @@ class Database:
                                 g_type = g_row["grantee_type"]
                                 g_id = g_row["grantee_id"]
                                 if g_type == "user":
-                                    u_clean = g_id.replace("user:", "")
+                                    u_clean = g_id.replace("user:", "").strip().lower()
+                                    u_noprefix = u_clean[2:] if u_clean.startswith("u_") else u_clean
+                                    targets_to_remove = {
+                                        u_clean, f"user:{u_clean}",
+                                        u_noprefix, f"user:{u_noprefix}",
+                                        f"u_{u_noprefix}", f"user:u_{u_noprefix}"
+                                    }
                                     users_list = json.loads(m_row["allowed_users"] or "[]")
-                                    new_users = [u for u in users_list if u != u_clean and u != f"user:{u_clean}"]
+                                    new_users = [u for u in users_list if u.strip().lower() not in targets_to_remove]
                                     if len(new_users) != len(users_list):
                                         cursor.execute("UPDATE resource_manifests SET allowed_users = ?, acl_version = acl_version + 1 WHERE resource_id = ?", (json.dumps(new_users), res_id))
                                 elif g_type == "role":
-                                    r_clean = g_id.replace("role:", "")
+                                    r_clean = g_id.replace("role:", "").strip().lower()
                                     roles_list = json.loads(m_row["allowed_roles"] or "[]")
-                                    new_roles = [r for r in roles_list if r != r_clean and r != f"role:{r_clean}"]
+                                    new_roles = [r for r in roles_list if r.strip().lower() != r_clean and r.strip().lower() != f"role:{r_clean}"]
                                     if len(new_roles) != len(roles_list):
                                         cursor.execute("UPDATE resource_manifests SET allowed_roles = ?, acl_version = acl_version + 1 WHERE resource_id = ?", (json.dumps(new_roles), res_id))
+                            
+                            # Invalidate dynamic chunk cache for this revoked resource
+                            cursor.execute("DELETE FROM dynamic_chunks WHERE resource_id = ?", (res_id,))
                     except Exception:
                         pass
 
