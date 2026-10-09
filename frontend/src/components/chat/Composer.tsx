@@ -1,15 +1,13 @@
 import React, { useState, useRef, useEffect } from "react"
 import {
-  ArrowUp,
-  FolderLock,
+  Send,
+  Compartment,
   ChevronDown,
-  Layers,
-  FileText,
-  X,
-} from "lucide-react"
+  Sheet,
+  Close,
+} from "../../glyphs"
 import { useApp } from "../../context/AppContext"
 import { VaultDocument } from "../../types"
-import { Badge } from "../ui/badge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +18,9 @@ import {
 } from "../ui/dropdown-menu"
 import { api } from "../../lib/api"
 import { RetrievalMode } from "../../types"
+import { Strata } from "../ui/strata"
+import { EngineChip } from "../ui/engine-chip"
+import { cn } from "../../lib/utils"
 
 interface ComposerProps {
   onSendMessage: (
@@ -47,7 +48,6 @@ export const Composer: React.FC<ComposerProps> = ({
     selectedVault,
     setSelectedVault,
     persona,
-    principal,
     selectedTargetFile,
     setSelectedTargetFile,
   } = useApp()
@@ -63,52 +63,32 @@ export const Composer: React.FC<ComposerProps> = ({
       onRetrievalModeChange(mode)
     }
   }
+
+  // Vault document list for scoping dropdown
   const [vaultDocs, setVaultDocs] = useState<VaultDocument[]>([])
+  const [loadingDocs, setLoadingDocs] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const currentUserId = principal?.user_id || principal?.username || persona.username
-  const isOwner = selectedVault
-    ? selectedVault.owner_id === currentUserId ||
-      selectedVault.owner_id === `user:${currentUserId}` ||
-      selectedVault.owner_id === persona.username
-    : false
-  const isAdmin = (principal?.roles || persona.roles || []).some(
-    (r) => r === "admin" || r === "security_admin"
-  )
-
-  // Fetch documents for the selected vault
   useEffect(() => {
-    if (!selectedVault) {
-      setVaultDocs([])
-      return
-    }
-
-    const applyDocs = (docs: VaultDocument[]) => {
-      setVaultDocs(docs)
-      // If user is not the vault owner and not an admin, and has access to only 1 document,
-      // auto-select that document as the query scope target
-      if (!isOwner && !isAdmin && docs.length === 1) {
-        if (!selectedTargetFile || selectedTargetFile.id !== docs[0].resource_id) {
-          setSelectedTargetFile({ id: docs[0].resource_id, name: docs[0].title })
-        }
-      }
-    }
-
-    if (selectedVault.documents && selectedVault.documents.length > 0) {
-      applyDocs(selectedVault.documents)
-    } else {
+    if (selectedVault) {
+      setLoadingDocs(true)
       api
         .getVaultDocuments(selectedVault.slug)
         .then((res) => {
-          applyDocs(res.documents || [])
+          setVaultDocs(res.documents || [])
         })
         .catch(() => {
           setVaultDocs([])
         })
+        .finally(() => {
+          setLoadingDocs(false)
+        })
+    } else {
+      setVaultDocs([])
     }
-  }, [selectedVault, persona, principal, isOwner, isAdmin])
+  }, [selectedVault])
 
-  // Auto resize textarea
+  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
@@ -118,13 +98,6 @@ export const Composer: React.FC<ComposerProps> = ({
       )}px`
     }
   }, [input])
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit()
-    }
-  }
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading || disabled) return
@@ -141,84 +114,68 @@ export const Composer: React.FC<ComposerProps> = ({
     }
   }
 
-  const getDetectedModel = () => {
-    if (!selectedTargetFile?.name) {
-      return {
-        badge: "💬 Gemma 3 4B",
-        name: "Gemma 3 4B",
-        label: "Neural LLM",
-        colorClass: "bg-blue-500/10 border-blue-500/30 text-blue-300",
-        dotClass: "bg-blue-400",
-      }
-    }
-    const ext = selectedTargetFile.name.split(".").pop()?.toLowerCase() || ""
-    if (["mp3", "wav", "m4a", "ogg", "flac", "aac"].includes(ext)) {
-      return {
-        badge: "🎙️ Whisper Base",
-        name: "Whisper Base",
-        label: "Speech-to-Text",
-        colorClass: "bg-amber-500/10 border-amber-500/30 text-amber-300",
-        dotClass: "bg-amber-400 animate-pulse",
-      }
-    }
-    if (["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext)) {
-      return {
-        badge: "👁️ Qwen 2.5-VL",
-        name: "Qwen 2.5-VL 3B",
-        label: "Vision AI",
-        colorClass: "bg-purple-500/10 border-purple-500/30 text-purple-300",
-        dotClass: "bg-purple-400 animate-pulse",
-      }
-    }
-    if (["mp4", "mkv", "avi", "mov", "webm"].includes(ext)) {
-      return {
-        badge: "🎬 Whisper + Qwen-VL",
-        name: "Whisper + Qwen-VL",
-        label: "Video AI",
-        colorClass: "bg-cyan-500/10 border-cyan-500/30 text-cyan-300",
-        dotClass: "bg-cyan-400 animate-pulse",
-      }
-    }
-    return {
-      badge: "💬 Gemma 3 4B",
-      name: "Gemma 3 4B",
-      label: "Document LLM",
-      colorClass: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
-      dotClass: "bg-emerald-400",
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit()
     }
   }
 
-  const detectedEngine = getDetectedModel()
+  const modes: { key: RetrievalMode; label: string; rings: number; desc: string; speed: string }[] = [
+    {
+      key: "LOW",
+      label: "Low",
+      rings: 1,
+      desc: "Standard FastEmbed vector search over persistent index",
+      speed: "Speed: High · Compute: Low",
+    },
+    {
+      key: "MEDIUM",
+      label: "Med",
+      rings: 2,
+      desc: "Lazy query-aware boundary slicing + deterministic cache",
+      speed: "Speed: Med · Precision: High",
+    },
+    {
+      key: "HIGH",
+      label: "High",
+      rings: 3,
+      desc: "Advanced intent analysis, hybrid search & local reranking",
+      speed: "Speed: Balanced · Quality: Max",
+    },
+  ]
+
+  const activeModeObj = modes.find((m) => m.key === activeRetrievalMode) || modes[0]
 
   return (
     <div className="w-full max-w-3xl mx-auto px-4 pb-4">
-      <div className="relative rounded-2xl border border-border/80 bg-surface-raised shadow-xl focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/30 transition-all overflow-hidden">
-        {/* Loading Progress Bar */}
+      <div className="relative rounded-2xl border border-border/80 bg-surface-raised shadow-xl focus-within:border-trust/60 focus-within:ring-1 focus-within:ring-trust/30 transition-all overflow-hidden e2">
+        {/* Loading Progress Bar with keyframe indeterminate (§A5, §8.3) */}
         {isLoading && (
           <div className="absolute top-0 inset-x-0 h-0.5 bg-secondary overflow-hidden rounded-t-2xl z-10">
-            <div className="w-full h-full bg-emerald-500 animate-[indeterminate_1.5s_infinite_linear]" />
+            <div className="w-full h-full bg-beam animate-indeterminate" />
           </div>
         )}
 
         {/* Dynamic Model & Scope Banner */}
         {selectedTargetFile && (
-          <div className="px-3.5 py-1.5 bg-surface-subtle/80 border-b border-border/60 flex items-center justify-between text-[11px]">
+          <div className="px-3.5 py-1.5 bg-secondary/60 border-b border-border/60 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-muted-foreground">Target:</span>
-              <span className="font-semibold text-foreground truncate max-w-[200px]">
+              <Sheet size={13} className="text-muted-foreground shrink-0" />
+              <span className="text-muted-foreground text-[11px]">Scope:</span>
+              <span className="font-medium text-foreground truncate max-w-[200px]">
                 {selectedTargetFile.name}
               </span>
+              <button
+                type="button"
+                onClick={() => setSelectedTargetFile(null)}
+                className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer"
+                title="Clear file scope"
+              >
+                <Close size={12} />
+              </button>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-muted-foreground hidden sm:inline">Engine:</span>
-              <span className={`font-semibold px-2 py-0.5 rounded border text-[10px] flex items-center gap-1 ${detectedEngine.colorClass}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${detectedEngine.dotClass}`} />
-                {detectedEngine.badge}
-              </span>
-              <span className="text-[9px] text-muted-foreground/80 font-mono hidden md:inline">
-                (Exclusive RAM)
-              </span>
-            </div>
+            <EngineChip fileName={selectedTargetFile.name} compact />
           </div>
         )}
 
@@ -235,7 +192,7 @@ export const Composer: React.FC<ComposerProps> = ({
           }
           disabled={disabled || isLoading}
           rows={1}
-          className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none max-h-48 leading-relaxed"
+          className="w-full bg-transparent px-4 pt-3.5 pb-2 text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none max-h-48 leading-relaxed font-sans"
         />
 
         {/* Bottom Context Controls & Send Button */}
@@ -245,137 +202,92 @@ export const Composer: React.FC<ComposerProps> = ({
             {/* Vault Switcher Chip */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-subtle hover:bg-secondary border border-border/70 text-muted-foreground hover:text-foreground text-[11px] transition-colors">
-                  <FolderLock className="h-3 w-3 text-emerald-400" />
-                  <span className="font-semibold text-foreground truncate max-w-[130px]">
-                    {selectedVault?.display_name || "Select Vault"}
+                <button className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-secondary/80 hover:bg-secondary border border-border text-muted-foreground hover:text-foreground text-[11px] transition-colors cursor-pointer">
+                  <Compartment size={13} className="text-muted-foreground" />
+                  <span className="font-medium text-foreground truncate max-w-[130px]">
+                    {selectedVault?.display_name || "Select Compartment"}
                   </span>
-                  <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                  <ChevronDown size={11} className="opacity-60 ml-0.5" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-56 text-xs">
                 <DropdownMenuLabel className="text-[11px]">
-                  Knowledge Workspaces
+                  Compartments
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 {vaults.map((v) => (
                   <DropdownMenuItem
-                    key={v.vault_id}
+                    key={v.slug}
                     onClick={() => {
                       setSelectedVault(v)
                       setSelectedTargetFile(null)
                     }}
-                    className="flex items-center justify-between text-xs cursor-pointer"
+                    className="flex items-center justify-between cursor-pointer"
                   >
-                    <div className="min-w-0 pr-1">
-                      <div className="font-medium truncate">{v.display_name}</div>
-                      <div className="text-[10px] text-muted-foreground font-mono">
-                        Ceiling: L{v.classification_ceiling}
-                      </div>
-                    </div>
-                    {selectedVault?.vault_id === v.vault_id && (
-                      <Badge variant="success" className="text-[9px] py-0 px-1 shrink-0">
-                        Active
-                      </Badge>
-                    )}
+                    <span className="truncate">{v.display_name}</span>
+                    <Strata level={v.classification_ceiling} size="sm" />
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Scope / File Selector Chip */}
+            {/* File/Scope Selector Chip */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] transition-colors ${
-                    selectedTargetFile
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 font-medium"
-                      : "bg-surface-subtle hover:bg-secondary border-border/70 text-muted-foreground hover:text-foreground"
-                  }`}
+                  disabled={!selectedVault}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-secondary/80 hover:bg-secondary border border-border text-muted-foreground hover:text-foreground text-[11px] transition-colors disabled:opacity-50 cursor-pointer"
                 >
-                  {selectedTargetFile ? (
-                    <FileText className="h-3 w-3 text-emerald-400 shrink-0" />
-                  ) : (
-                    <Layers className="h-3 w-3 text-emerald-400 shrink-0" />
-                  )}
-                  <span className="truncate max-w-[140px]">
-                    {selectedTargetFile
-                      ? selectedTargetFile.name
-                      : selectedVault && !isOwner && !isAdmin && vaultDocs.length > 0
-                      ? `All Accessible (${vaultDocs.length})`
-                      : "All Files in Folder"}
+                  <Sheet size={13} className="text-muted-foreground" />
+                  <span className="truncate max-w-[120px]">
+                    {selectedTargetFile ? selectedTargetFile.name : "All Files"}
                   </span>
-                  <ChevronDown className="h-3 w-3 opacity-60 ml-0.5" />
+                  <ChevronDown size={11} className="opacity-60 ml-0.5" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-64 max-h-60 overflow-y-auto text-xs">
-                <DropdownMenuLabel className="text-[11px]">Query Scope</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[11px]">
+                  Scope by Resource
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => setSelectedTargetFile(null)}
-                  className="flex items-center justify-between text-xs cursor-pointer"
+                  className="cursor-pointer"
                 >
-                  <div className="flex items-center gap-2">
-                    <Layers className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>
-                      {selectedVault && !isOwner && !isAdmin && vaultDocs.length > 0
-                        ? `All Accessible Files (${vaultDocs.length})`
-                        : "All Files in Folder"}
-                    </span>
-                  </div>
-                  {!selectedTargetFile && (
-                    <Badge variant="success" className="text-[9px] py-0 px-1">
-                      Active
-                    </Badge>
-                  )}
+                  <span>All Compartment Files (Default)</span>
                 </DropdownMenuItem>
-
-                {vaultDocs.length > 0 && <DropdownMenuSeparator />}
-
-                {vaultDocs.map((doc) => {
-                  const isSelected = selectedTargetFile?.id === doc.resource_id
-                  return (
+                {loadingDocs ? (
+                  <div className="p-2 text-center text-muted-foreground text-[11px]">
+                    Loading files...
+                  </div>
+                ) : (
+                  vaultDocs.map((doc) => (
                     <DropdownMenuItem
                       key={doc.resource_id}
                       onClick={() =>
-                        setSelectedTargetFile({ id: doc.resource_id, name: doc.title })
+                        setSelectedTargetFile({
+                          id: doc.resource_id,
+                          name: doc.title,
+                        })
                       }
-                      className="flex items-center justify-between text-xs cursor-pointer"
+                      className="cursor-pointer flex items-center justify-between"
                     >
-                      <div className="flex items-center gap-2 min-w-0 pr-1">
-                        <FileText className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                        <span className="truncate">{doc.title}</span>
-                      </div>
-                      {isSelected && (
-                        <Badge variant="success" className="text-[9px] py-0 px-1 shrink-0">
-                          Active
-                        </Badge>
-                      )}
+                      <span className="truncate max-w-[160px]">{doc.title}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">
+                        L{doc.classification}
+                      </span>
                     </DropdownMenuItem>
-                  )
-                })}
+                  ))
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Quick Remove File Scope Button if file is selected */}
-            {selectedTargetFile && (
-              <button
-                type="button"
-                onClick={() => setSelectedTargetFile(null)}
-                className="h-6 w-6 rounded-md hover:bg-secondary flex items-center justify-center text-muted-foreground hover:text-foreground"
-                title="Reset scope to all files"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-
-            {/* Purpose Tag */}
+            {/* Purpose Selector */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-subtle hover:bg-secondary border border-border/70 text-muted-foreground hover:text-foreground text-[11px] transition-colors">
-                  <span>Purpose:</span>
-                  <span className="text-foreground font-mono capitalize">
-                    {purpose.replace("_", " ")}
-                  </span>
+                <button className="flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary/80 hover:bg-secondary border border-border text-muted-foreground hover:text-foreground text-[11px] transition-colors cursor-pointer">
+                  <span className="capitalize">{purpose.replace("_", " ")}</span>
+                  <ChevronDown size={11} className="opacity-60 ml-0.5" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-48 text-xs">
@@ -395,82 +307,72 @@ export const Composer: React.FC<ComposerProps> = ({
             </DropdownMenu>
 
             {/* User Clearance Indicator */}
-            <Badge variant="clearance" className="hidden sm:inline-flex text-[10px] py-0 font-mono">
-              L{persona.clearanceLevel}
-            </Badge>
+            <Strata level={persona.clearanceLevel} size="sm" className="hidden sm:inline-flex" />
 
-            {/* Retrieval Mode Segmented Selector (§Part 1) */}
+            {/* Gatelight Depth Dial (3-Segment Pill with Ring Glyphs) */}
             <div
-              className="flex items-center rounded-lg bg-surface-subtle border border-border/70 p-0.5 text-[10px]"
-              title={`Retrieval Mode: ${activeRetrievalMode}\nLOW: Standard vector retrieval\nMEDIUM: Lazy query-aware chunking & secure caching\nHIGH: Advanced hybrid retrieval & local reranking`}
+              className="flex items-center rounded-lg bg-secondary border border-border p-0.5 text-[10px] select-none"
+              title={`Retrieval Depth: ${activeRetrievalMode}\nLOW: Fast vector search\nMEDIUM: Lazy query chunking & cache\nHIGH: Intent analysis & local reranking`}
             >
-              <button
-                type="button"
-                onClick={() => handleModeChange("LOW")}
-                className={`px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer ${
-                  activeRetrievalMode === "LOW"
-                    ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 shadow-xs"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                }`}
-                title="LOW Mode: Standard Pre-indexed Vector Search (Fast, minimal compute)"
-              >
-                LOW
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange("MEDIUM")}
-                className={`px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer ${
-                  activeRetrievalMode === "MEDIUM"
-                    ? "bg-blue-500/20 text-blue-300 font-bold border border-blue-500/40 shadow-xs"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                }`}
-                title="MEDIUM Mode: Lazy, Query-Aware Chunking (On-demand sentence slicing & caching)"
-              >
-                MED
-              </button>
-              <button
-                type="button"
-                onClick={() => handleModeChange("HIGH")}
-                className={`px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer ${
-                  activeRetrievalMode === "HIGH"
-                    ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/40 shadow-xs"
-                    : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-                }`}
-                title="HIGH Mode: Advanced Query-Aware Retrieval (Intent analysis, hybrid scoring & local reranking)"
-              >
-                HIGH
-              </button>
+              {modes.map((m) => {
+                const isSelected = activeRetrievalMode === m.key
+                return (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => handleModeChange(m.key)}
+                    className={cn(
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer",
+                      isSelected
+                        ? "bg-surface text-foreground font-semibold border border-border shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <span className="flex items-center gap-0.5">
+                      {[1, 2, 3].map((r) => (
+                        <i
+                          key={r}
+                          className={cn(
+                            "w-1.5 h-1.5 rounded-full border border-trust",
+                            r <= m.rings ? "bg-trust" : "bg-transparent"
+                          )}
+                        />
+                      ))}
+                    </span>
+                    <span>{m.label}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
           {/* Right: Send Button */}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground/60 hidden sm:inline-block font-mono">
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[10px] text-muted-foreground hidden sm:inline-block font-mono">
               ↵ Send
             </span>
             <button
+              type="button"
               onClick={handleSubmit}
               disabled={!input.trim() || isLoading || disabled}
-              className="h-7.5 w-7.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 flex items-center justify-center disabled:opacity-40 disabled:hover:bg-emerald-600 transition-all shadow-sm"
+              className="h-7 w-7 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center disabled:opacity-40 transition-all shadow-xs cursor-pointer"
               title="Send prompt"
             >
-              <ArrowUp className="h-4 w-4" />
+              <Send size={14} />
             </button>
           </div>
         </div>
 
-        {/* Retrieval Mode Description & Speed/Quality Tradeoff */}
-        <div className="px-3.5 py-1 bg-surface-subtle/50 border-t border-border/30 flex items-center justify-between text-[10px] text-muted-foreground select-none">
+        {/* Retrieval Mode Description Footer */}
+        <div className="px-3.5 py-1 bg-surface border-t border-border/40 flex items-center justify-between text-[10px] text-muted-foreground select-none">
           <div className="flex items-center gap-1.5 truncate">
-            <span className="font-semibold text-foreground/80">Mode [{activeRetrievalMode}]:</span>
-            <span className="truncate">
-              {activeRetrievalMode === "LOW" && "Standard FastEmbed vector search from persistent index"}
-              {activeRetrievalMode === "MEDIUM" && "Lazy query-aware boundary slicing + deterministic content-hash cache"}
-              {activeRetrievalMode === "HIGH" && "Advanced intent analysis, hybrid scoring, context expansion & local reranking"}
+            <span className="font-medium text-foreground">
+              Depth [{activeRetrievalMode}]:
             </span>
+            <span className="truncate">{activeModeObj.desc}</span>
           </div>
-          <span className="font-mono text-[9px] opacity-75 shrink-0 hidden md:inline ml-2">
-            {activeRetrievalMode === "LOW" ? "Speed: High · Compute: Low" : activeRetrievalMode === "MEDIUM" ? "Speed: Medium · Precision: High" : "Speed: Balanced · Quality: Maximum"}
+          <span className="font-mono text-[9px] text-muted-foreground shrink-0 hidden md:inline ml-2">
+            {activeModeObj.speed}
           </span>
         </div>
       </div>

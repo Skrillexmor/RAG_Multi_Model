@@ -127,4 +127,20 @@ export const storage = {
   setDensity(density: "comfortable" | "compact"): void {
     localStorage.setItem(DENSITY_KEY, density)
   },
+
+  getMotion(): "system" | "on" | "off" {
+    return (localStorage.getItem("dars_rag_motion") as any) || "system"
+  },
+
+  setMotion(motion: "system" | "on" | "off"): void {
+    localStorage.setItem("dars_rag_motion", motion)
+    if (motion === "off") {
+      document.documentElement.dataset.motion = "off"
+    } else if (motion === "on") {
+      document.documentElement.dataset.motion = "on"
+    } else {
+      delete document.documentElement.dataset.motion
+    }
+  },
 }
+

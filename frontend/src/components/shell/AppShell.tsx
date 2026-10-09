@@ -100,10 +100,9 @@ export const AppShell: React.FC = () => {
 
       {/* Toast Notification Container */}
       <Toaster
-        theme="dark"
         position="bottom-right"
         toastOptions={{
-          className: "bg-surface-raised border border-border text-foreground text-xs shadow-xl",
+          className: "bg-surface-raised border border-border text-foreground text-xs shadow-xl e2",
         }}
       />
     </div>

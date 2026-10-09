@@ -1,25 +1,24 @@
 import React, { useState } from "react"
 import {
-  CheckCircle2,
-  ShieldCheck,
-  FileText,
+  Verify,
+  Sheet as SheetGlyph,
   Lock,
-  Hash,
-  Clock,
+  Session,
   ChevronDown,
   ChevronUp,
   Copy,
   Check,
-  Image as ImageIcon,
-  Video as VideoIcon,
-  Music as AudioIcon,
-  Code as CodeIcon,
-  Volume2,
-} from "lucide-react"
+  Frame,
+  Reel,
+  Wave,
+  Brackets,
+} from "../../glyphs"
 import { EvidenceItem } from "../../types"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet"
 import { Badge } from "../ui/badge"
-import { Button } from "../ui/button"
+import { Seal } from "../ui/seal"
+import { Identicon } from "../ui/identicon"
+import { Strata } from "../ui/strata"
 
 interface EvidenceInspectorProps {
   evidence: EvidenceItem | null
@@ -57,54 +56,53 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="overflow-y-auto w-full sm:max-w-md md:max-w-lg">
+      <SheetContent side="right" className="overflow-y-auto w-full sm:max-w-md md:max-w-lg bg-surface-raised border-l border-border e3">
         <SheetHeader className="pb-4 border-b border-border">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-emerald-950/60 border border-emerald-800/60 flex items-center justify-center">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <SheetTitle className="text-base font-semibold text-foreground">
+                Evidence
+              </SheetTitle>
+              <span className="text-xs font-mono text-muted-foreground">
+                {evidence.evidence_id}
+              </span>
             </div>
-            <SheetTitle className="text-base font-semibold">
-              Evidence & Provenance Inspector
-            </SheetTitle>
+            <Seal state="verified" size={24} animate={true} />
           </div>
-          <SheetDescription className="text-xs">
+          <SheetDescription className="text-xs text-muted-foreground">
             Verified canonical evidence record passed through Gate A & Gate B authorization.
           </SheetDescription>
         </SheetHeader>
 
         <div className="py-4 space-y-5 text-xs">
           {/* Document & Provenance Header */}
-          <div className="p-3 rounded-xl border border-border bg-surface-subtle space-y-2">
+          <div className="p-3 rounded-xl border border-border bg-surface space-y-2.5 e1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium text-foreground">
-                <div className={`h-6 w-6 rounded-md flex items-center justify-center border ${
-                  isImage ? "bg-indigo-500/10 border-indigo-500/25 text-indigo-400" :
-                  isVideo ? "bg-amber-500/10 border-amber-500/25 text-amber-400" :
-                  isAudio ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400" :
-                  isCode ? "bg-sky-500/10 border-sky-500/25 text-sky-400" :
-                  "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                }`}>
-                  {isImage ? <ImageIcon className="h-3.5 w-3.5" /> :
-                   isVideo ? <VideoIcon className="h-3.5 w-3.5" /> :
-                   isAudio ? <AudioIcon className="h-3.5 w-3.5" /> :
-                   isCode ? <CodeIcon className="h-3.5 w-3.5" /> :
-                   <FileText className="h-3.5 w-3.5" />}
+                <div className="h-6 w-6 rounded-md flex items-center justify-center border border-border bg-secondary text-foreground">
+                  {isImage ? (
+                    <Frame size={14} />
+                  ) : isVideo ? (
+                    <Reel size={14} />
+                  ) : isAudio ? (
+                    <Wave size={14} />
+                  ) : isCode ? (
+                    <Brackets size={14} />
+                  ) : (
+                    <SheetGlyph size={14} />
+                  )}
                 </div>
-                <span className="truncate max-w-[200px]">{evidence.vault_name || "Authorized Document"}</span>
-                <span className={`text-[9px] font-mono px-1 py-0.2 rounded border uppercase font-medium ${
-                  isImage ? "border-indigo-500/30 text-indigo-300 bg-indigo-500/5" :
-                  isVideo ? "border-amber-500/30 text-amber-300 bg-amber-500/5" :
-                  isAudio ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/5" :
-                  isCode ? "border-sky-500/30 text-sky-300 bg-sky-500/5" :
-                  "border-border/60 text-muted-foreground bg-surface-raised"
-                }`}>
+                <span className="truncate max-w-[200px] font-sans">
+                  {evidence.vault_name || "Authorized Document"}
+                </span>
+                <span className="text-[10px] font-mono px-1 rounded border border-border text-muted-foreground bg-secondary uppercase">
                   {isImage ? "IMAGE" : isVideo ? "VIDEO" : isAudio ? "AUDIO" : isCode ? "CODE" : "DOC"}
                 </span>
               </div>
-              <Badge variant="clearance">L{evidence.classification}</Badge>
+              <Strata level={evidence.classification} size="sm" />
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground pt-1 border-t border-border/40">
+            <div className="grid grid-cols-2 gap-2 text-[11px] text-muted-foreground pt-1.5 border-t border-border/40">
               <div>
                 Locator:{" "}
                 <span className="font-mono text-foreground">
@@ -113,7 +111,7 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
               </div>
               <div>
                 Relevance:{" "}
-                <span className="font-mono text-emerald-400 font-medium">
+                <span className="font-mono text-trust font-medium">
                   {(evidence.score * 100).toFixed(1)}%
                 </span>
               </div>
@@ -124,19 +122,19 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
           {isImage && mediaUrl && (
             <div className="space-y-1.5">
               <div className="font-medium text-foreground text-xs flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-indigo-300">
-                  <ImageIcon className="h-3.5 w-3.5" />
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Frame size={14} className="text-muted-foreground" />
                   <span>Visual Evidence Source</span>
                 </span>
                 <span className="text-[10px] text-muted-foreground font-mono">
-                  Qwen 2.5-VL 3B + OCR
+                  Qwen 2.5-VL 3B
                 </span>
               </div>
               <div className="rounded-xl overflow-hidden border border-border bg-black/40 p-2">
                 <img
                   src={mediaUrl}
                   alt="Visual evidence"
-                  className="max-h-56 mx-auto rounded-lg object-contain shadow-sm"
+                  className="max-h-56 mx-auto rounded-lg object-contain shadow-xs"
                 />
               </div>
             </div>
@@ -145,12 +143,12 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
           {isVideo && (keyframeUrl || mediaUrl) && (
             <div className="space-y-1.5">
               <div className="font-medium text-foreground text-xs flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-amber-300">
-                  <VideoIcon className="h-3.5 w-3.5" />
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Reel size={14} className="text-muted-foreground" />
                   <span>Video Keyframe {timestamp ? `[${timestamp}]` : ""}</span>
                 </span>
                 <span className="text-[10px] text-muted-foreground font-mono">
-                  OpenCV Keyframe & OCR
+                  OpenCV Keyframe
                 </span>
               </div>
               <div className="rounded-xl overflow-hidden border border-border bg-black/40 p-2 space-y-2">
@@ -158,7 +156,7 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
                   <img
                     src={keyframeUrl}
                     alt="Video keyframe"
-                    className="max-h-52 mx-auto rounded-lg object-contain shadow-sm"
+                    className="max-h-52 mx-auto rounded-lg object-contain shadow-xs"
                   />
                 )}
                 {mediaUrl && (
@@ -171,15 +169,15 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
           {isAudio && mediaUrl && (
             <div className="space-y-1.5">
               <div className="font-medium text-foreground text-xs flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-emerald-400">
-                  <Volume2 className="h-3.5 w-3.5" />
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <Wave size={14} className="text-muted-foreground" />
                   <span>Audio Segment Playback {timestamp ? `[${timestamp}]` : ""}</span>
                 </span>
                 <span className="text-[10px] text-muted-foreground font-mono">
                   AES-256 Storage
                 </span>
               </div>
-              <div className="p-3 rounded-xl border border-border bg-surface-subtle">
+              <div className="p-3 rounded-xl border border-border bg-surface">
                 <audio controls src={mediaUrl} className="w-full h-8" />
               </div>
             </div>
@@ -189,12 +187,12 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
           <div className="space-y-1.5">
             <div className="font-medium text-foreground text-xs flex items-center justify-between">
               <span>Canonical Evidence Excerpt</span>
-              <span className="text-[10px] text-emerald-400 font-mono">
-                Decrypted AES-256-GCM
+              <span className="text-[10px] text-muted-foreground font-mono flex items-center gap-1">
+                <Lock size={10} /> Decrypted AES-256-GCM
               </span>
             </div>
-            <div className={`p-3.5 rounded-xl border border-border/80 bg-surface-raised font-sans text-xs text-foreground/90 leading-relaxed whitespace-pre-wrap ${
-              isCode ? "font-mono bg-black/30 border-sky-950/40" : ""
+            <div className={`p-3.5 rounded-xl border border-border bg-surface font-sans text-xs text-foreground leading-relaxed whitespace-pre-wrap sealed ${
+              isCode ? "font-mono bg-black/30" : ""
             }`}>
               {evidence.content || "Empty content"}
             </div>
@@ -209,7 +207,7 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
               </Badge>
             </div>
 
-            <div className="rounded-xl border border-border bg-surface-subtle/40 divide-y divide-border/60 overflow-hidden">
+            <div className="rounded-xl border border-border bg-surface divide-y divide-border/60 overflow-hidden e1">
               <div className="flex justify-between px-3 py-2 text-[11px]">
                 <span className="text-muted-foreground">Evidence ID</span>
                 <span className="font-mono text-foreground truncate max-w-[180px]">
@@ -233,17 +231,20 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
 
               <div className="flex justify-between px-3 py-2 text-[11px]">
                 <span className="text-muted-foreground">Clock Status</span>
-                <span className="font-mono text-emerald-400 flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
+                <span className="font-mono text-permit flex items-center gap-1">
+                  <Session size={12} />
                   {proof?.time_status || "OK"}
                 </span>
               </div>
 
-              <div className="flex justify-between px-3 py-2 text-[11px]">
+              <div className="flex justify-between px-3 py-2 text-[11px] items-center">
                 <span className="text-muted-foreground">Content SHA-256</span>
-                <span className="font-mono text-foreground truncate max-w-[160px]">
-                  {proof?.hash || "verified"}
-                </span>
+                <div className="flex items-center gap-1.5 font-mono text-foreground">
+                  <span className="truncate max-w-[140px]">
+                    {proof?.hash ? `${proof.hash.slice(0, 8)}...${proof.hash.slice(-4)}` : "verified"}
+                  </span>
+                  {proof?.hash && <Identicon hash={proof.hash} size={15} />}
+                </div>
               </div>
             </div>
           </div>
@@ -251,28 +252,30 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
           {/* Expandable Technical JSON (§11) */}
           <div className="pt-2 border-t border-border/60">
             <button
+              type="button"
               onClick={() => setShowTechnicalProof(!showTechnicalProof)}
-              className="w-full flex items-center justify-between py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="w-full flex items-center justify-between py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
             >
               <span>Developer Details & Cryptographic Payload</span>
               {showTechnicalProof ? (
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp size={14} />
               ) : (
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown size={14} />
               )}
             </button>
 
             {showTechnicalProof && (
-              <div className="mt-2 relative rounded-xl bg-black/40 border border-border/80 p-3">
+              <div className="mt-2 relative rounded-xl bg-black/40 border border-border p-3">
                 <button
+                  type="button"
                   onClick={handleCopyProof}
-                  className="absolute top-2 right-2 p-1 rounded bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground"
+                  className="absolute top-2 right-2 p-1 rounded bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground cursor-pointer"
                   title="Copy JSON"
                 >
                   {copied ? (
-                    <Check className="h-3 w-3 text-emerald-400" />
+                    <Check size={13} className="text-permit" />
                   ) : (
-                    <Copy className="h-3 w-3" />
+                    <Copy size={13} />
                   )}
                 </button>
                 <pre className="font-mono text-[10px] text-muted-foreground overflow-x-auto max-h-48">

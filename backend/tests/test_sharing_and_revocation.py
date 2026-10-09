@@ -22,6 +22,12 @@ from backend.app.api import (
     AssignVaultRequest,
 )
 
+class DummyClient:
+    host = "127.0.0.1"
+
+class DummyRequest:
+    client = DummyClient()
+
 @pytest.fixture
 def test_setup():
     alice = PolicyEngine.get_principal_by_username("alice")
@@ -340,3 +346,30 @@ def test_rag_query_with_charlie_isolated_to_single_file(test_setup):
     with pytest.raises(HTTPException) as exc_info:
         query_rag(req=rag_req, request=DummyRequest(), principal=charlie)
     assert exc_info.value.status_code == 403
+
+def test_query_rag_empty_vault_returns_clean_folder_empty_notification(test_setup):
+    """
+    When a user queries a vault that has 0 active documents, query_rag must
+    return a clear FOLDER_EMPTY notice rather than a cryptic cryptographic refusal.
+    """
+    from backend.app.api import query_rag, QueryRequest, create_vault, CreateVaultRequest
+
+    alice = test_setup["alice"]
+    # Create a fresh empty vault
+    v_req = CreateVaultRequest(
+        name="Empty Test Vault",
+        slug="empty-test-vault",
+        classification_ceiling=2
+    )
+    v_res = create_vault(v_req, alice)
+    v_slug = v_res["slug"]
+
+    rag_req = QueryRequest(
+        query="What documents are in here?",
+        vault_slug=v_slug
+    )
+    res = query_rag(req=rag_req, request=DummyRequest(), principal=alice)
+    assert res.security_trace.refusal_reason == "FOLDER_EMPTY"
+    assert "currently empty" in res.answer
+    assert res.security_trace.generation_mode == "ANSWER_BLOCKED"
+

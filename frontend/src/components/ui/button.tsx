@@ -23,7 +23,7 @@ const buttonVariants = cva(
         subtle:
           "bg-surface-subtle border border-surface-border text-foreground hover:bg-accent hover:border-border",
         security:
-          "bg-emerald-950/40 text-emerald-300 border border-emerald-800/50 hover:bg-emerald-900/40",
+          "bg-trust/10 text-trust border border-trust/30 hover:bg-trust/20",
       },
       size: {
         default: "h-9 px-4 py-2",

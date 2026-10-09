@@ -1,23 +1,24 @@
 import React from "react"
 import {
-  ShieldAlert,
-  ShieldCheck,
-  CheckCircle2,
-  FileText,
+  Aperture,
+  Verify,
+  GateClosed,
+  Sheet,
   Lock,
-  ExternalLink,
   ChevronRight,
-  Info,
-  Image as ImageIcon,
-  Video as VideoIcon,
-  Music as AudioIcon,
-  Code as CodeIcon,
+  Frame,
+  Reel,
+  Wave,
+  Brackets,
   Play,
-} from "lucide-react"
-import { Message, CitationRef, EvidenceItem } from "../../types"
+  Session,
+} from "../../glyphs"
+import { Message, CitationRef } from "../../types"
 import { useApp } from "../../context/AppContext"
 import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
+import { Strata } from "../ui/strata"
+import { cn } from "../../lib/utils"
 
 interface MessageItemProps {
   message: Message
@@ -28,12 +29,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   message,
   onRequestAccess,
 }) => {
-  const { openEvidenceInspector, openTraceInspector } = useApp()
+  const { openEvidenceInspector, openTraceInspector, persona, vaults } = useApp()
 
   if (message.role === "user") {
     return (
-      <div className="w-full py-4 flex justify-end">
-        <div className="max-w-2xl px-4 py-2.5 rounded-2xl bg-secondary text-foreground text-sm leading-relaxed shadow-sm">
+      <div className="w-full py-3.5 flex justify-end">
+        <div className="max-w-2xl px-4 py-2.5 rounded-2xl bg-secondary text-foreground text-sm leading-relaxed shadow-xs">
           {message.content}
         </div>
       </div>
@@ -44,7 +45,10 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     message.mode === "REFUSAL" ||
     (message.refusalReason && message.refusalReason !== "NONE")
 
-  // Enhanced Markdown & Citation parser
+  const targetVault = vaults.find((v) => v.slug === message.vaultSlug)
+  const ceiling = targetVault?.classification_ceiling || 3
+
+  // Enhanced Markdown & Citation parser per DESIGN.md §6.5
   const renderFormattedContent = (content: string, citations?: CitationRef[]) => {
     if (!content) return null
 
@@ -67,8 +71,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                   if (ev) openEvidenceInspector(ev)
                 }
               }}
-              className="inline-flex items-center px-1.5 py-0.5 mx-0.5 text-[11px] font-mono rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors cursor-pointer select-none font-medium align-baseline"
-              title={`Citation ${citId}: Click to inspect verified proof`}
+              className="inline-flex items-center px-1.5 py-0.5 mx-0.5 text-[11px] font-mono rounded-md bg-trust/15 text-trust border border-trust/30 hover:bg-trust/25 transition-all cursor-pointer select-none font-medium align-baseline sealed"
+              title={`Citation ${citId}: Click to inspect verified evidence proof`}
             >
               {token}
             </button>
@@ -82,12 +86,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             </strong>
           )
         }
-        // Inline code check
+        // Inline code
         if (token.startsWith("`") && token.endsWith("`")) {
           return (
             <code
               key={idx}
-              className="px-1.5 py-0.5 rounded bg-surface-subtle border border-border/60 text-emerald-300 font-mono text-xs"
+              className="px-1 py-0.5 rounded bg-secondary border border-border text-foreground font-mono text-xs"
             >
               {token.slice(1, -1)}
             </code>
@@ -98,56 +102,27 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     }
 
     const lines = content.split("\n")
-
     return (
-      <div className="space-y-2 text-sm leading-relaxed text-foreground">
+      <div className="space-y-3 leading-relaxed text-[15px] font-sans">
         {lines.map((line, idx) => {
-          const trimmed = line.trim()
-          if (!trimmed) {
-            return <div key={idx} className="h-1.5" />
-          }
+          if (!line.trim()) return <div key={idx} className="h-1.5" />
 
-          // Header 3 or 2 or 1
-          if (trimmed.startsWith("### ")) {
+          // Unordered list item
+          if (line.trim().startsWith("- ") || line.trim().startsWith("* ")) {
             return (
-              <h4 key={idx} className="text-sm font-bold text-foreground mt-2 pb-0.5">
-                {renderInline(trimmed.replace(/^###\s+/, ""))}
-              </h4>
-            )
-          }
-          if (trimmed.startsWith("## ")) {
-            return (
-              <h3 key={idx} className="text-base font-bold text-foreground mt-3 pb-0.5">
-                {renderInline(trimmed.replace(/^##\s+/, ""))}
-              </h3>
-            )
-          }
-          if (trimmed.startsWith("# ")) {
-            return (
-              <h2 key={idx} className="text-lg font-bold text-foreground mt-3 pb-1">
-                {renderInline(trimmed.replace(/^#\s+/, ""))}
-              </h2>
-            )
-          }
-
-          // Bullet list items
-          if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-            return (
-              <div key={idx} className="flex items-start gap-2 pl-2">
-                <span className="text-emerald-400 mt-1.5 text-xs">•</span>
-                <div className="flex-1">
-                  {renderInline(trimmed.replace(/^[-*]\s+/, ""))}
-                </div>
+              <div key={idx} className="flex items-start gap-2.5 pl-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-beam mt-2 shrink-0" />
+                <div className="flex-1">{renderInline(line.trim().slice(2))}</div>
               </div>
             )
           }
 
-          // Numbered list items
-          const numMatch = trimmed.match(/^([0-9]+)\.\s+(.*)/)
+          // Numbered list item
+          const numMatch = line.match(/^([0-9]+)\.\s+(.*)/)
           if (numMatch) {
             return (
               <div key={idx} className="flex items-start gap-2 pl-2">
-                <span className="font-mono text-xs text-emerald-400/90 font-medium mt-0.5">
+                <span className="font-mono text-xs text-muted-foreground font-medium mt-1">
                   {numMatch[1]}.
                 </span>
                 <div className="flex-1">{renderInline(numMatch[2])}</div>
@@ -163,71 +138,111 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   }
 
   return (
-    <div className="w-full py-4 border-b border-border/30 last:border-none">
+    <div className="w-full py-4 border-b border-border/40 last:border-none">
       <div className="max-w-3xl mx-auto space-y-3.5">
         {/* Assistant Header Badge */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground select-none">
-          <div className="h-5 w-5 rounded-full bg-surface-subtle border border-border flex items-center justify-center">
-            <ShieldCheck className="h-3 w-3 text-emerald-400" />
+          <div className="h-5 w-5 rounded-md bg-secondary border border-border flex items-center justify-center">
+            <Aperture size={13} accent="hsl(var(--beam))" />
           </div>
           <span className="font-medium text-foreground">PrivateRAG</span>
           <span className="text-muted-foreground/40">·</span>
           <span className="text-[11px]">
-            {isRefusal ? "Policy Boundary Refusal" : "Verified Grounded Synthesis"}
+            {isRefusal
+              ? message.refusalReason === "FOLDER_EMPTY"
+                ? "Folder Notice"
+                : "Outside Clearance"
+              : "Verified, Grounded Synthesis"}
           </span>
         </div>
 
-        {/* Controlled Refusal State (§8.3) */}
+        {/* The Closed Gate Refusal State (§6.6) */}
         {isRefusal ? (
-          <div className="p-4 rounded-xl border border-amber-800/40 bg-amber-950/20 text-foreground space-y-3">
-            <div className="flex items-start gap-2.5">
-              <ShieldAlert className="h-4 w-4 text-amber-400 mt-0.5 shrink-0" />
-              <div>
-                <h4 className="text-xs font-semibold text-amber-300">
-                  Access-Controlled Information Boundary
-                </h4>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  {message.content ||
-                    "This question requested information outside your current authorization scope. No restricted evidence was provided to the local model."}
-                </p>
+          message.refusalReason === "FOLDER_EMPTY" ? (
+            <div className="p-4 rounded-xl border border-border bg-secondary/40 text-foreground space-y-3">
+              <div className="flex items-start gap-2.5">
+                <Sheet size={18} className="text-muted-foreground mt-0.5 shrink-0" />
+                <div>
+                  <h4 className="text-xs font-semibold text-foreground">
+                    Folder is Empty
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    {message.content}
+                  </p>
+                </div>
               </div>
-            </div>
 
-            <div className="pt-2 border-t border-amber-800/30 flex items-center justify-between text-xs">
-              <div className="text-[11px] text-muted-foreground">
-                Reason:{" "}
-                <span className="font-mono text-amber-200">
-                  {message.refusalReason || "UNAUTHORIZED_SCOPE"}
-                </span>
+              <div className="pt-2 border-t border-border flex items-center justify-between text-xs">
+                <div className="text-[11px] text-muted-foreground">
+                  Status: <span className="font-mono text-muted-foreground">FOLDER_EMPTY</span>
+                </div>
               </div>
-              {onRequestAccess && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onRequestAccess(message.vaultSlug)}
-                  className="text-xs h-7 border-amber-800/50 text-amber-300 hover:bg-amber-950/40"
-                >
-                  <Lock className="h-3 w-3 mr-1.5" />
-                  Request Temporary Access
-                </Button>
-              )}
             </div>
-          </div>
+          ) : (
+            <div className="p-4 rounded-xl border border-deny/30 bg-deny/5 text-foreground space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-deny/15 text-deny shrink-0">
+                  <GateClosed size={20} />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-sm font-semibold text-foreground">
+                    Outside your clearance
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    {message.content ||
+                      "This record is classified above your authorization level. Gate A excluded it before retrieval, so nothing restricted reached the model."}
+                  </p>
+
+                  {/* Strata Clearance Gap Diagram */}
+                  <div className="mt-3.5 flex items-center gap-3">
+                    <Strata
+                      level={persona.clearanceLevel}
+                      ceiling={ceiling}
+                      size="lg"
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      Compartment ceiling: L{ceiling}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2.5 border-t border-deny/20 flex items-center justify-between text-xs">
+                <div className="text-[11px] text-muted-foreground font-mono">
+                  Reason:{" "}
+                  <span className="text-foreground">
+                    {message.refusalReason || "UNAUTHORIZED_SCOPE"}
+                  </span>
+                </div>
+                {onRequestAccess && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onRequestAccess(message.vaultSlug)}
+                    className="text-xs h-7 border-hold/40 text-hold hover:bg-hold/10"
+                  >
+                    <Session size={12} className="mr-1.5" />
+                    Request Temporary Access
+                  </Button>
+                )}
+              </div>
+            </div>
+          )
         ) : (
           /* Normal Grounded Answer */
-          <div className="text-sm text-foreground">
+          <div className="text-foreground">
             {renderFormattedContent(message.content, message.citations)}
           </div>
         )}
 
-        {/* Sources Used Block (§8.2) */}
+        {/* Sources Used Block (§6.5) */}
         {message.citations && message.citations.length > 0 && (
-          <div className="mt-3 pt-3 border-t border-border/40 space-y-2">
+          <div className="mt-3.5 pt-3.5 border-t border-border/40 space-y-2.5">
             <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
               <span>Sources Used</span>
-              <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono">
-                <CheckCircle2 className="h-3 w-3" />
-                Exact Canonical Quotes Verified
+              <span className="text-[10px] text-trust flex items-center gap-1 font-mono">
+                <Verify size={12} />
+                Exact quotes verified
               </span>
             </div>
 
@@ -250,41 +265,50 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                 return (
                   <button
                     key={idx}
+                    type="button"
                     onClick={() => {
                       if (ev) openEvidenceInspector(ev)
                     }}
-                    className="text-left p-2.5 rounded-xl border border-border/70 bg-surface-subtle/50 hover:bg-surface-subtle hover:border-emerald-500/40 transition-all group flex items-start justify-between gap-2.5"
+                    className="text-left p-2.5 rounded-xl border border-border/80 bg-surface hover:bg-secondary/60 hover:border-trust/40 transition-all group flex items-start justify-between gap-2.5 cursor-pointer sealed"
                   >
-                    {/* Multimodal Preview Thumbnail / Icon */}
+                    {/* Multimodal Preview Thumbnail / Glyph */}
                     {isImage && mediaUrl ? (
                       <div className="h-12 w-12 rounded-lg overflow-hidden border border-border shrink-0 bg-black/40">
-                        <img src={mediaUrl} alt="Evidence thumbnail" className="h-full w-full object-cover" />
+                        <img
+                          src={mediaUrl}
+                          alt="Evidence thumbnail"
+                          className="h-full w-full object-cover"
+                        />
                       </div>
                     ) : isVideo && keyframeUrl ? (
                       <div className="relative h-12 w-16 rounded-lg overflow-hidden border border-border shrink-0 bg-black/40">
-                        <img src={keyframeUrl} alt="Video keyframe" className="h-full w-full object-cover" />
+                        <img
+                          src={keyframeUrl}
+                          alt="Video keyframe"
+                          className="h-full w-full object-cover"
+                        />
                         <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
-                          <Play className="h-3.5 w-3.5 text-white fill-white/80" />
+                          <Play size={14} className="text-white fill-white/80" />
                         </div>
                       </div>
                     ) : (
-                      <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border mt-0.5 ${
-                        isImage ? "bg-indigo-500/10 border-indigo-500/25 text-indigo-400" :
-                        isVideo ? "bg-amber-500/10 border-amber-500/25 text-amber-400" :
-                        isAudio ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400" :
-                        isCode ? "bg-sky-500/10 border-sky-500/25 text-sky-400" :
-                        "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                      }`}>
-                        {isImage ? <ImageIcon className="h-4 w-4" /> :
-                         isVideo ? <VideoIcon className="h-4 w-4" /> :
-                         isAudio ? <AudioIcon className="h-4 w-4" /> :
-                         isCode ? <CodeIcon className="h-4 w-4" /> :
-                         <FileText className="h-4 w-4" />}
+                      <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border border-border bg-secondary mt-0.5 text-muted-foreground group-hover:text-foreground">
+                        {isImage ? (
+                          <Frame size={16} />
+                        ) : isVideo ? (
+                          <Reel size={16} />
+                        ) : isAudio ? (
+                          <Wave size={16} />
+                        ) : isCode ? (
+                          <Brackets size={16} />
+                        ) : (
+                          <Sheet size={16} />
+                        )}
                       </div>
                     )}
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground group-hover:text-emerald-400 transition-colors">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-foreground group-hover:text-trust transition-colors">
                         <span className="truncate">{cit.vault_name || "Document"}</span>
                         <Badge
                           variant="clearance"
@@ -293,7 +317,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                           {cit.locator || `[${cit.citation_id}]`}
                         </Badge>
                         {timestamp && (
-                          <span className="text-[9px] font-mono px-1 py-0.2 rounded border border-amber-500/30 text-amber-300 bg-amber-500/5">
+                          <span className="text-[9px] font-mono px-1 rounded border border-border text-muted-foreground bg-secondary">
                             {timestamp}
                           </span>
                         )}
@@ -303,7 +327,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                       </p>
                     </div>
 
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-foreground shrink-0 mt-1" />
+                    <ChevronRight size={14} className="text-muted-foreground/60 group-hover:text-foreground shrink-0 mt-1" />
                   </button>
                 )
               })}
@@ -311,47 +335,32 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
 
-        {/* Security Summary Component (§39) */}
+        {/* Security Summary Component (§6.5) */}
         {message.securityTrace && (
-          <div className="pt-1 flex items-center justify-between text-[11px] text-muted-foreground flex-wrap gap-2">
+          <div className="pt-1.5 flex items-center justify-between text-[11px] text-muted-foreground flex-wrap gap-2">
             <button
+              type="button"
               onClick={() => openTraceInspector(message.securityTrace!)}
               className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors group cursor-pointer"
             >
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-              <span>
-                Gate A:{" "}
-                <span className="font-mono text-foreground">
-                  {message.securityTrace.gate_a?.candidates_count ?? (message.securityTrace as any).gate_a_candidates_count ?? 0}
-                </span>{" "}
-                candidates · Gate B:{" "}
-                <span className="font-mono text-foreground">
-                  {message.securityTrace.gate_b?.authorized_count ?? (message.securityTrace as any).gate_b_canonical_verified_count ?? 0}
-                </span>{" "}
-                authorized
+              <Verify size={13} className="text-trust" />
+              <span>Gate Path:</span>
+              <span className="font-mono text-foreground font-medium">
+                Gate A ({message.securityTrace.gate_a?.candidates_count ?? 0}) ▸ Gate B (
+                {message.securityTrace.gate_b?.authorized_count ?? 0})
               </span>
-              <span className="text-[10px] text-muted-foreground group-hover:underline ml-1">
-                (View security trace)
-              </span>
+              <span className="text-muted-foreground">· Click to inspect trace</span>
             </button>
 
             <div className="flex items-center gap-2">
-              {(message.securityTrace.retrieval_mode || message.retrievalMode) && (
-                <span
-                  className={`text-[9px] font-mono font-semibold px-1.5 py-0.2 rounded border ${
-                    (message.securityTrace.retrieval_mode || message.retrievalMode) === "LOW"
-                      ? "border-emerald-500/40 text-emerald-400 bg-emerald-500/5"
-                      : (message.securityTrace.retrieval_mode || message.retrievalMode) === "MEDIUM"
-                      ? "border-blue-500/40 text-blue-400 bg-blue-500/5"
-                      : "border-purple-500/40 text-purple-400 bg-purple-500/5"
-                  }`}
-                  title={`Query resolved with ${message.securityTrace.retrieval_mode || message.retrievalMode} retrieval pipeline`}
-                >
-                  {message.securityTrace.retrieval_mode || message.retrievalMode} MODE
+              {(message.securityTrace as any)?.lease_deadline && (
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  Lease: {new Date((message.securityTrace as any).lease_deadline).toLocaleTimeString()}
                 </span>
               )}
-              <span className="font-mono text-[10px] text-muted-foreground/60">
-                Closed-World Invariant ✓
+              <span className="text-[10px] font-mono text-trust flex items-center gap-1">
+                <Lock size={10} />
+                Closed world · sealed
               </span>
             </div>
           </div>

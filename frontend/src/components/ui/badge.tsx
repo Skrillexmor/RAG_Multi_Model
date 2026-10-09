@@ -15,11 +15,13 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-destructive-foreground",
         outline: "text-foreground border-border",
         success:
-          "border-emerald-800/40 bg-emerald-950/40 text-emerald-300",
+          "border-permit/30 bg-permit/10 text-permit",
         warning:
-          "border-amber-800/40 bg-amber-950/40 text-amber-300",
+          "border-hold/30 bg-hold/10 text-hold",
         danger:
-          "border-rose-800/40 bg-rose-950/40 text-rose-300",
+          "border-deny/30 bg-deny/10 text-deny",
+        trust:
+          "border-trust/30 bg-trust/10 text-trust",
         clearance:
           "border-border bg-surface-subtle text-muted-foreground font-mono text-[11px]",
         vault:

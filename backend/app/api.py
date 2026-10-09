@@ -1667,6 +1667,66 @@ def query_rag(
     if retrieval_mode not in ("LOW", "MEDIUM", "HIGH"):
         retrieval_mode = "LOW"
 
+    # Pre-check: Determine if the target vault or resource has any active documents
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        if req.resource_id:
+            cursor.execute("SELECT COUNT(*) FROM resources WHERE vault_id = ? AND resource_id = ? AND status = 'active'", (vault.vault_id, req.resource_id))
+        else:
+            cursor.execute("SELECT COUNT(*) FROM resources WHERE vault_id = ? AND status = 'active'", (vault.vault_id,))
+        active_docs_count = cursor.fetchone()[0]
+
+    if active_docs_count == 0:
+        empty_answer = (
+            f"This folder ('{vault.display_name}') is currently empty. "
+            "No active documents or media files have been uploaded to it yet. "
+            "Please upload files into this folder to enable grounded questions and answers."
+        )
+        gate_a_data = {"compiled_filter_valid": True, "candidates_count": 0}
+        gate_b_data = {"evaluated_count": 0, "authorized_count": 0, "excluded_count": 0}
+        grounding_data = {"claims_count": 0, "citations_count": 0, "status": "REFUSED"}
+        trace = RetrievalSecurityTrace(
+            user_id=principal.user_id,
+            role=principal.roles[0] if principal.roles else "viewer",
+            vault_slug=vault.slug,
+            policy_epoch=lease.policy_epoch,
+            retrieval_mode=retrieval_mode,
+            vector_filter_applied=compiled_filter.to_dict(),
+            gate_a_candidates_count=0,
+            gate_b_canonical_verified_count=0,
+            excluded_candidates_count=0,
+            citations_validated_count=0,
+            citations_total_count=0,
+            generation_mode="ANSWER_BLOCKED",
+            answer_status="REFUSED",
+            refusal_reason="FOLDER_EMPTY",
+            gate_a=gate_a_data,
+            gate_b=gate_b_data,
+            grounding=grounding_data
+        )
+        audit_service.log_event(
+            request_id=req_id,
+            actor_id=principal.user_id,
+            action=ACTION_QUERY_RAG,
+            object_type="vault",
+            object_id=vault.vault_id,
+            decision="ALLOW",
+            policy_version=vault.vault_epoch,
+            reason_code="FOLDER_EMPTY",
+            client_ip=client_ip
+        )
+        return QueryResponse(
+            query=req.query,
+            vault_slug=vault.slug,
+            retrieval_mode=retrieval_mode,
+            answer=empty_answer,
+            claims=[],
+            citations=[],
+            evidence_items=[],
+            security_trace=trace,
+            lease_deadline=lease.deadline
+        )
+
     candidate_tuples = retrieval_pipeline.retrieve(
         mode=retrieval_mode,
         query=search_query,

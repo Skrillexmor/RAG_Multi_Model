@@ -27,6 +27,7 @@ import {
   X,
   ExternalLink,
   Info,
+  SlidersHorizontal,
 } from "lucide-react"
 import { AuditEvent, SystemMetrics } from "../../types"
 import { api } from "../../lib/api"
@@ -35,7 +36,107 @@ import { Button } from "../ui/button"
 import { Badge } from "../ui/badge"
 import { Input } from "../ui/input"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet"
+import { Identicon } from "../ui/identicon"
+import { Seal } from "../ui/seal"
+import { Glyph } from "../../glyphs"
+import { cn } from "../../lib/utils"
 import { toast } from "sonner"
+
+// Radial 270° SVG Arc Gauge
+interface ArcGaugeProps {
+  label: string
+  icon: React.ReactNode
+  value: number // percent 0..100
+  displayValue?: string
+  unit?: string
+  sublabelLeft: string
+  sublabelRight: string
+}
+
+const ArcGauge: React.FC<ArcGaugeProps> = ({
+  label,
+  icon,
+  value,
+  displayValue,
+  unit = "%",
+  sublabelLeft,
+  sublabelRight,
+}) => {
+  const clamped = Math.max(0, Math.min(100, Math.round(value)))
+  // 270 degree arc math:
+  // r = 32. Center = (42, 42).
+  // Circumference = 2 * PI * 32 = 201.06
+  // 270° arc length = 201.06 * 0.75 = 150.8
+  const arcLength = 150.8
+  const offset = arcLength * (1 - clamped / 100)
+
+  // Color transitions: rest (trust) -> hold > 75% -> deny > 90%
+  const colorClass =
+    clamped > 90
+      ? "text-deny stroke-deny"
+      : clamped > 75
+      ? "text-hold stroke-hold"
+      : "text-trust stroke-trust"
+
+  return (
+    <div className="p-4 rounded-xl border border-border bg-surface-raised flex flex-col justify-between relative overflow-hidden transition-all duration-300 hover:border-border/80">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+          {icon}
+          <span>{label}</span>
+        </span>
+        <span className={cn("text-xs font-mono font-bold", colorClass)}>
+          {displayValue ?? `${clamped}${unit}`}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-center my-1 relative">
+        <svg viewBox="0 0 84 84" className="w-24 h-24">
+          {/* Background track arc */}
+          <circle
+            cx="42"
+            cy="42"
+            r="32"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            strokeDasharray="150.8 201.1"
+            className="text-border/50"
+            transform="rotate(135 42 42)"
+          />
+          {/* Foreground active arc */}
+          <circle
+            cx="42"
+            cy="42"
+            r="32"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            strokeDasharray="150.8 201.1"
+            strokeDashoffset={offset}
+            className={cn("transition-all duration-700 ease-out", colorClass)}
+            transform="rotate(135 42 42)"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pt-1">
+          <span className="font-mono text-base font-semibold tabular-nums text-foreground tracking-tight">
+            {displayValue ?? `${clamped}${unit}`}
+          </span>
+          <span className="text-[9px] font-mono text-muted-foreground uppercase tracking-wider">
+            telemetry
+          </span>
+        </div>
+      </div>
+
+      <div className="flex justify-between text-[10px] text-muted-foreground font-mono mt-1 pt-2 border-t border-border/50">
+        <span className="truncate max-w-[50%]">{sublabelLeft}</span>
+        <span className="truncate max-w-[50%] text-right">{sublabelRight}</span>
+      </div>
+    </div>
+  )
+}
 
 export const AuditView: React.FC = () => {
   const { persona, principal } = useApp()
@@ -54,6 +155,8 @@ export const AuditView: React.FC = () => {
   const [search, setSearch] = useState<string>("")
   const [isCreatingCheckpoint, setIsCreatingCheckpoint] = useState<boolean>(false)
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
+  const [sweepRowIndex, setSweepRowIndex] = useState<number | null>(null)
+  const [scanPulse, setScanPulse] = useState<boolean>(false)
 
   const isAdmin = (principal?.roles || persona.roles || []).some(
     (r) => r === "admin" || r === "security_admin" || r === "auditor"
@@ -70,6 +173,10 @@ export const AuditView: React.FC = () => {
       if (mRes) setMetrics(mRes)
       if (vRes) setVerifyStatus(vRes)
       setLastUpdated(new Date())
+
+      // Heartbeat pulse animation
+      setScanPulse(true)
+      setTimeout(() => setScanPulse(false), 900)
     } catch (err: any) {
       // silently handle in background polling
     }
@@ -90,7 +197,15 @@ export const AuditView: React.FC = () => {
 
   const handleVerifyChain = async () => {
     setIsVerifying(true)
+    setSweepRowIndex(0)
     try {
+      // Animate sweep across the visible rows
+      const displayCount = Math.min(filteredEvents.length, 12)
+      for (let i = 0; i < displayCount; i++) {
+        setSweepRowIndex(i)
+        await new Promise((r) => setTimeout(r, 60))
+      }
+
       const res = await api.verifyAuditChain()
       setVerifyStatus(res)
       if (res.valid) {
@@ -104,6 +219,7 @@ export const AuditView: React.FC = () => {
       toast.error(`Verification error: ${err.message}`)
     } finally {
       setIsVerifying(false)
+      setSweepRowIndex(null)
     }
   }
 
@@ -145,42 +261,51 @@ export const AuditView: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 max-w-6xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 max-w-6xl mx-auto w-full relative">
+      {/* 1px Beam Scan-line Heartbeat sweep on live poll */}
+      {scanPulse && (
+        <div
+          className="pointer-events-none fixed left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-beam to-transparent z-50 animate-in fade-in duration-300"
+          style={{ top: "64px" }}
+        />
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <h2 className="text-xl font-semibold text-foreground tracking-tight">
-              Cryptographic Audit & Telemetry Dashboard
+              Audit
             </h2>
-            <Badge
-              variant="outline"
-              className={`text-[10px] py-0 ${
+            <span
+              className={cn(
+                "inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono border",
                 isAdmin
-                  ? "border-sky-500/30 text-sky-400"
-                  : "border-emerald-500/30 text-emerald-400"
-              }`}
+                  ? "bg-secondary/60 border-border text-foreground"
+                  : "bg-surface-raised border-border text-muted-foreground"
+              )}
             >
               {isAdmin ? "SOC Global View" : "Personal Activity Log"}
-            </Badge>
+            </span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">
-            Immutable SHA-256 hash-chained log with real-time hardware telemetry and Ed25519 checkpoints.
+            Immutable SHA-256 hash-chained ledger with real-time hardware telemetry and Ed25519 checkpoints.
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Live stream indicator */}
+          {/* Live stream toggle */}
           <button
             onClick={() => setIsLiveActive(!isLiveActive)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs transition-colors ${
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs transition-colors",
               isLiveActive
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300 font-medium"
+                ? "bg-trust/10 border-trust/30 text-trust font-medium"
                 : "bg-surface border-border text-muted-foreground hover:text-foreground"
-            }`}
+            )}
           >
-            <Radio className={`h-3 w-3 ${isLiveActive ? "text-emerald-400 animate-pulse" : "text-muted-foreground"}`} />
-            <span>{isLiveActive ? "Live Stream (Active)" : "Live Stream (Paused)"}</span>
+            <Radio className={cn("h-3 w-3", isLiveActive ? "text-trust animate-pulse" : "text-muted-foreground")} />
+            <span>{isLiveActive ? "Live (Active)" : "Live (Paused)"}</span>
           </button>
 
           <Button
@@ -199,7 +324,7 @@ export const AuditView: React.FC = () => {
               variant="outline"
               onClick={handleCreateCheckpoint}
               disabled={isCreatingCheckpoint}
-              className="text-xs h-8 gap-1.5 border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/10"
+              className="text-xs h-8 gap-1.5 border-border hover:bg-surface-subtle"
             >
               {isCreatingCheckpoint ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -215,12 +340,12 @@ export const AuditView: React.FC = () => {
             variant="security"
             onClick={handleVerifyChain}
             disabled={isVerifying}
-            className="gap-1.5 text-xs h-8 font-medium"
+            className="gap-1.5 text-xs h-8 font-medium bg-foreground text-background hover:bg-foreground/90"
           >
             {isVerifying ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <ShieldCheck className="h-3.5 w-3.5" />
+              <Seal state="verified" size={14} className="text-current" />
             )}
             <span>Verify Hash Chain</span>
           </Button>
@@ -231,7 +356,7 @@ export const AuditView: React.FC = () => {
       {!isAdmin && (
         <div className="p-3.5 rounded-xl border border-border bg-surface-raised/60 text-xs flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-muted-foreground">
-            <Info className="h-4 w-4 text-emerald-400 shrink-0" />
+            <Info className="h-4 w-4 text-trust shrink-0" />
             <span>
               Displaying events strictly associated with identity{" "}
               <strong className="text-foreground font-mono">{persona.name}</strong> to protect peer privacy under NIST SP 800-162 tenant isolation.
@@ -243,12 +368,12 @@ export const AuditView: React.FC = () => {
         </div>
       )}
 
-      {/* HARDWARE & SOFTWARE TELEMETRY GAUGES (REAL-TIME DASHBOARD) */}
+      {/* HARDWARE & SOFTWARE TELEMETRY GAUGES (RADIAL 270° SWEEP) */}
       {metrics && (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs">
             <span className="font-semibold text-foreground uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-              <Activity className="h-3.5 w-3.5 text-emerald-400" />
+              <Activity className="h-3.5 w-3.5 text-trust" />
               <span>Real-Time System & Hardware Telemetry</span>
             </span>
             <span className="text-[10px] text-muted-foreground font-mono">
@@ -257,101 +382,43 @@ export const AuditView: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* RAM Meter */}
-            <div className="p-4 rounded-xl border border-border bg-surface-raised space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Server className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>RAM Memory</span>
-                </span>
-                <span className="text-xs font-mono font-bold text-emerald-400">
-                  {metrics.hardware.ram_percent}%
-                </span>
-              </div>
-              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-emerald-400 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, metrics.hardware.ram_percent)}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                <span>{metrics.hardware.ram_used_gb} GB used</span>
-                <span>{metrics.hardware.ram_total_gb} GB total</span>
-              </div>
-            </div>
+            {/* RAM Arc Gauge */}
+            <ArcGauge
+              label="RAM Memory"
+              icon={<Server className="h-3.5 w-3.5 text-trust" />}
+              value={metrics.hardware.ram_percent}
+              sublabelLeft={`${metrics.hardware.ram_used_gb} GB used`}
+              sublabelRight={`${metrics.hardware.ram_total_gb} GB total`}
+            />
 
-            {/* CPU Load */}
-            <div className="p-4 rounded-xl border border-border bg-surface-raised space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
-                  <Cpu className="h-3.5 w-3.5 text-sky-400" />
-                  <span>CPU Processor</span>
-                </span>
-                <span className="text-xs font-mono font-bold text-sky-400">
-                  {metrics.hardware.cpu_percent}%
-                </span>
-              </div>
-              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-sky-400 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.max(4, Math.min(100, metrics.hardware.cpu_percent))}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                <span>{metrics.hardware.cpu_cores} Active Cores</span>
-                <span>{metrics.hardware.cpu_freq_mhz ? `${metrics.hardware.cpu_freq_mhz} MHz` : "Turbo"}</span>
-              </div>
-            </div>
+            {/* CPU Arc Gauge */}
+            <ArcGauge
+              label="CPU Processor"
+              icon={<Cpu className="h-3.5 w-3.5 text-trust" />}
+              value={metrics.hardware.cpu_percent}
+              sublabelLeft={`${metrics.hardware.cpu_cores} Active Cores`}
+              sublabelRight={metrics.hardware.cpu_freq_mhz ? `${metrics.hardware.cpu_freq_mhz} MHz` : "Turbo"}
+            />
 
-            {/* Storage & DB */}
-            <div className="p-4 rounded-xl border border-border bg-surface-raised space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
-                  <HardDrive className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>Storage & DB Size</span>
-                </span>
-                <span className="text-xs font-mono font-bold text-indigo-400">
-                  {metrics.storage.db_size_mb} MB
-                </span>
-              </div>
-              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
-                <div
-                  className="bg-indigo-400 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(100, metrics.hardware.disk_percent)}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                <span>{metrics.storage.total_chunks} chunks stored</span>
-                <span>{metrics.storage.total_resources} files encrypted</span>
-              </div>
-            </div>
+            {/* Storage Arc Gauge */}
+            <ArcGauge
+              label="Storage & DB"
+              icon={<HardDrive className="h-3.5 w-3.5 text-trust" />}
+              value={metrics.hardware.disk_percent}
+              displayValue={`${metrics.hardware.disk_percent}%`}
+              sublabelLeft={`${metrics.storage.db_size_mb} MB DB`}
+              sublabelRight={`${metrics.storage.total_chunks} chunks`}
+            />
 
-            {/* Security Decision Ratio */}
-            <div className="p-4 rounded-xl border border-border bg-surface-raised space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
-                  <ShieldCheck className="h-3.5 w-3.5 text-amber-400" />
-                  <span>Gate A/B Permits</span>
-                </span>
-                <span className="text-xs font-mono font-bold text-emerald-400">
-                  {metrics.security.permit_rate}%
-                </span>
-              </div>
-              <div className="w-full bg-secondary h-2 rounded-full overflow-hidden flex">
-                <div
-                  className="bg-emerald-400 h-full"
-                  style={{ width: `${metrics.security.permit_rate}%` }}
-                />
-                <div
-                  className="bg-rose-400 h-full"
-                  style={{ width: `${metrics.security.deny_rate}%` }}
-                />
-              </div>
-              <div className="flex justify-between text-[10px] text-muted-foreground font-mono">
-                <span className="text-emerald-400 font-medium">{metrics.security.permits} PERMITS</span>
-                <span className="text-rose-400 font-medium">{metrics.security.denies} DENIES</span>
-              </div>
-            </div>
+            {/* Decision Ratio Arc Gauge */}
+            <ArcGauge
+              label="Gate A/B Permits"
+              icon={<ShieldCheck className="h-3.5 w-3.5 text-trust" />}
+              value={metrics.security.permit_rate}
+              displayValue={`${metrics.security.permit_rate}%`}
+              sublabelLeft={`${metrics.security.permits} PERMITS`}
+              sublabelRight={`${metrics.security.denies} DENIES`}
+            />
           </div>
         </div>
       )}
@@ -368,8 +435,8 @@ export const AuditView: React.FC = () => {
 
         <div className="p-3.5 rounded-xl border border-border bg-surface-raised space-y-1">
           <div className="text-[11px] text-muted-foreground">Hash Chain Integrity</div>
-          <div className="text-xl font-bold font-mono text-emerald-400 flex items-center gap-1.5">
-            <CheckCircle2 className="h-4 w-4" />
+          <div className="text-xl font-bold font-mono text-trust flex items-center gap-1.5">
+            <Seal state={verifyStatus?.valid !== false ? "verified" : "broken"} size={18} />
             <span>{verifyStatus?.valid ? "VALID & UNBROKEN" : "VERIFIED"}</span>
           </div>
           <div className="text-[10px] text-muted-foreground font-mono">
@@ -379,7 +446,7 @@ export const AuditView: React.FC = () => {
 
         <div className="p-3.5 rounded-xl border border-border bg-surface-raised space-y-1">
           <div className="text-[11px] text-muted-foreground">Active Signed Grants</div>
-          <div className="text-xl font-bold font-mono text-sky-400">
+          <div className="text-xl font-bold font-mono text-foreground">
             {metrics ? metrics.storage.active_grants : "Active"}
           </div>
           <div className="text-[10px] text-muted-foreground">Governed by JIT Access Control</div>
@@ -404,11 +471,12 @@ export const AuditView: React.FC = () => {
               <button
                 key={dec}
                 onClick={() => setFilterDecision(dec)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={cn(
+                  "px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors",
                   filterDecision === dec
-                    ? "bg-secondary text-foreground"
+                    ? "bg-secondary text-foreground shadow-xs"
                     : "text-muted-foreground hover:text-foreground"
-                }`}
+                )}
               >
                 {dec}
               </button>
@@ -428,7 +496,7 @@ export const AuditView: React.FC = () => {
           <p className="text-[11px]">System events will appear here in real-time as queries are executed.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-surface-raised overflow-hidden shadow-xs">
+        <div className="rounded-xl border border-border bg-surface-raised overflow-hidden shadow-xs relative">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead className="bg-surface-subtle text-muted-foreground border-b border-border text-[11px]">
@@ -438,18 +506,24 @@ export const AuditView: React.FC = () => {
                   <th className="p-3 font-medium">Action & Target</th>
                   <th className="p-3 font-medium">Decision</th>
                   <th className="p-3 font-medium">Reason Code</th>
-                  <th className="p-3 font-medium">Cryptographic Hash</th>
+                  <th className="p-3 font-medium">Hash Chain Link</th>
                   <th className="p-3 font-medium text-right">Details</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
-                {filteredEvents.map((ev) => {
+                {filteredEvents.map((ev, idx) => {
                   const isPermit = ev.decision === "PERMIT" || ev.decision === "ALLOW"
+                  const isSwept = sweepRowIndex !== null && idx <= sweepRowIndex
+                  const isCurrentSweep = sweepRowIndex === idx
+
                   return (
                     <tr
-                      key={ev.event_id || ev.request_id}
+                      key={ev.event_id || ev.request_id || idx}
                       onClick={() => setSelectedEvent(ev)}
-                      className="hover:bg-surface-subtle/50 transition-colors cursor-pointer group"
+                      className={cn(
+                        "hover:bg-surface-subtle/50 transition-colors cursor-pointer group relative",
+                        isCurrentSweep && "bg-trust/10 transition-colors duration-150"
+                      )}
                     >
                       {/* Timestamp */}
                       <td className="p-3 font-mono text-[11px] text-muted-foreground whitespace-nowrap">
@@ -465,7 +539,7 @@ export const AuditView: React.FC = () => {
                       {/* Actor */}
                       <td className="p-3">
                         <div className="flex items-center gap-1.5 font-medium text-foreground">
-                          <User className="h-3 w-3 text-emerald-400" />
+                          <User className="h-3 w-3 text-trust" />
                           <span className="truncate max-w-[120px]">{ev.actor_id}</span>
                         </div>
                       </td>
@@ -484,12 +558,16 @@ export const AuditView: React.FC = () => {
 
                       {/* Decision */}
                       <td className="p-3">
-                        <Badge
-                          variant={isPermit ? "success" : "destructive"}
-                          className="text-[9px] py-0 font-mono uppercase"
+                        <span
+                          className={cn(
+                            "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium uppercase border",
+                            isPermit
+                              ? "bg-trust/10 border-trust/30 text-trust"
+                              : "bg-deny/10 border-deny/30 text-deny"
+                          )}
                         >
                           {ev.decision}
-                        </Badge>
+                        </span>
                       </td>
 
                       {/* Reason Code */}
@@ -499,11 +577,27 @@ export const AuditView: React.FC = () => {
                         </span>
                       </td>
 
-                      {/* Hash Link */}
-                      <td className="p-3 font-mono text-[10px] text-emerald-400/90 whitespace-nowrap">
-                        <span className="truncate max-w-[100px] inline-block" title={ev.current_hash}>
-                          {ev.current_hash ? `${ev.current_hash.slice(0, 8)}...${ev.current_hash.slice(-6)}` : "—"}
-                        </span>
+                      {/* Linked Hash Blocks (§71) */}
+                      <td className="p-3 font-mono text-[11px] whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="px-1.5 py-0.5 rounded bg-surface border border-border text-muted-foreground text-[10px]"
+                            title={`Previous hash: ${ev.prev_hash || "genesis"}`}
+                          >
+                            {ev.prev_hash ? ev.prev_hash.slice(0, 6) : "000000"}
+                          </span>
+                          <span className="text-muted-foreground/40 text-[9px]">→</span>
+                          <span
+                            className="px-1.5 py-0.5 rounded bg-surface border border-border text-foreground font-semibold text-[10px] flex items-center gap-1.5"
+                            title={`Current hash: ${ev.current_hash}`}
+                          >
+                            <span>{ev.current_hash ? ev.current_hash.slice(0, 6) : "------"}</span>
+                            <Identicon hash={ev.current_hash || "000000"} size={12} />
+                          </span>
+                          {isSwept && (
+                            <Seal state="verified" size={12} className="text-trust ml-1" />
+                          )}
+                        </div>
                       </td>
 
                       {/* Action */}
@@ -526,16 +620,16 @@ export const AuditView: React.FC = () => {
             <div className="space-y-6">
               <SheetHeader>
                 <div className="flex items-center gap-2">
-                  <Badge
-                    variant={
+                  <span
+                    className={cn(
+                      "inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-medium uppercase border",
                       selectedEvent.decision === "PERMIT" || selectedEvent.decision === "ALLOW"
-                        ? "success"
-                        : "destructive"
-                    }
-                    className="text-[10px] font-mono py-0"
+                        ? "bg-trust/10 border-trust/30 text-trust"
+                        : "bg-deny/10 border-deny/30 text-deny"
+                    )}
                   >
                     {selectedEvent.decision}
-                  </Badge>
+                  </span>
                   <SheetTitle className="text-sm font-mono truncate">
                     {selectedEvent.action}
                   </SheetTitle>
@@ -547,25 +641,25 @@ export const AuditView: React.FC = () => {
 
               {/* Event Attributes */}
               <div className="space-y-3 text-xs">
-                <div className="p-3 rounded-lg bg-surface-raised border border-border space-y-2">
+                <div className="p-3.5 rounded-lg bg-surface-raised border border-border space-y-2.5">
                   <div className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
                     Authorization Details
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <span className="text-muted-foreground">Actor:</span>
+                      <span className="text-muted-foreground text-[11px]">Actor:</span>
                       <div className="font-mono text-foreground font-medium">{selectedEvent.actor_id}</div>
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Target Type:</span>
+                      <span className="text-muted-foreground text-[11px]">Target Type:</span>
                       <div className="font-mono text-foreground">{selectedEvent.object_type}</div>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-muted-foreground">Target Object ID:</span>
+                      <span className="text-muted-foreground text-[11px]">Target Object ID:</span>
                       <div className="font-mono text-foreground break-all">{selectedEvent.object_id}</div>
                     </div>
                     <div className="col-span-2">
-                      <span className="text-muted-foreground">Reason Code:</span>
+                      <span className="text-muted-foreground text-[11px]">Reason Code:</span>
                       <div className="font-mono text-foreground break-all text-[11px] p-2 rounded bg-surface border border-border/80 mt-1">
                         {selectedEvent.reason_code}
                       </div>
@@ -574,20 +668,26 @@ export const AuditView: React.FC = () => {
                 </div>
 
                 {/* Cryptographic Linkage */}
-                <div className="p-3 rounded-lg bg-surface-raised border border-border space-y-2">
-                  <div className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <Hash className="h-3.5 w-3.5 text-emerald-400" />
-                    <span>Cryptographic Hash Linkage (§71)</span>
+                <div className="p-3.5 rounded-lg bg-surface-raised border border-border space-y-2.5">
+                  <div className="text-[11px] font-semibold text-foreground uppercase tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Hash className="h-3.5 w-3.5 text-trust" />
+                      <span>Cryptographic Hash Linkage (§71)</span>
+                    </span>
+                    <Seal state="verified" size={16} />
                   </div>
                   <div>
                     <span className="text-muted-foreground text-[10px]">Previous Event Hash:</span>
-                    <div className="font-mono text-[10px] text-muted-foreground break-all bg-surface p-1.5 rounded border border-border/60">
-                      {selectedEvent.prev_hash}
+                    <div className="font-mono text-[10px] text-muted-foreground break-all bg-surface p-2 rounded border border-border/60">
+                      {selectedEvent.prev_hash || "genesis"}
                     </div>
                   </div>
                   <div>
-                    <span className="text-muted-foreground text-[10px]">Current Record Hash:</span>
-                    <div className="font-mono text-[10px] text-emerald-400 break-all bg-surface p-1.5 rounded border border-emerald-500/30">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-muted-foreground text-[10px]">Current Record Hash:</span>
+                      <Identicon hash={selectedEvent.current_hash} size={14} />
+                    </div>
+                    <div className="font-mono text-[10px] text-trust break-all bg-surface p-2 rounded border border-trust/30 font-medium">
                       {selectedEvent.current_hash}
                     </div>
                   </div>
@@ -608,3 +708,4 @@ export const AuditView: React.FC = () => {
     </div>
   )
 }
+

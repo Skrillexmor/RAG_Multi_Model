@@ -1,19 +1,18 @@
 import React, { useEffect } from "react"
 import { Command } from "cmdk"
 import {
-  MessageSquare,
-  FileText,
-  ShieldCheck,
-  KeyRound,
-  Network,
-  History,
-  ShieldAlert,
-  Settings,
-  Plus,
-  User,
-  RotateCw,
-  CheckCircle2,
-} from "lucide-react"
+  Ask,
+  Sheet,
+  Compartment,
+  Grant,
+  Mesh,
+  Ledger,
+  Verify,
+  Tune,
+  Add,
+  People,
+  Refresh,
+} from "../../glyphs"
 import { useApp } from "../../context/AppContext"
 import { DEMO_PERSONAS } from "../../lib/personas"
 
@@ -24,8 +23,6 @@ export const CommandPalette: React.FC = () => {
     navigate,
     startNewChat,
     switchPersona,
-    vaults,
-    setSelectedVault,
   } = useApp()
 
   useEffect(() => {
@@ -47,16 +44,16 @@ export const CommandPalette: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4 animate-in fade-in-0 duration-150">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[4px] flex items-center justify-center p-4 animate-in fade-in-0 duration-150">
       <div
-        className="w-full max-w-lg rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden"
+        className="w-full max-w-lg rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden e3"
         onClick={(e) => e.stopPropagation()}
       >
         <Command className="w-full bg-transparent text-foreground">
-          <div className="flex items-center px-3 border-b border-border">
+          <div className="flex items-center px-3.5 border-b border-border">
             <Command.Input
-              placeholder="Type a command or search..."
-              className="w-full h-11 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+              placeholder="Type a command or jump to view..."
+              className="w-full h-11 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none font-sans"
               autoFocus
             />
           </div>
@@ -67,114 +64,122 @@ export const CommandPalette: React.FC = () => {
             </Command.Empty>
 
             {/* Quick Actions */}
-            <Command.Group heading="Quick Actions" className="text-[10px] font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">
+            <Command.Group
+              heading="Quick Actions"
+              className="text-[10.5px] font-medium text-muted-foreground px-2 py-1 tracking-tight"
+            >
               <Command.Item
                 onSelect={() => handleSelect(() => startNewChat())}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <Plus className="h-4 w-4 text-emerald-400" />
+                <Add size={14} className="text-muted-foreground" />
                 <span>Start New Chat</span>
               </Command.Item>
               <Command.Item
-                onSelect={() => handleSelect(() => navigate("chunks"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                onSelect={() => handleSelect(() => navigate("tests"))}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <RotateCw className="h-4 w-4 text-emerald-400" />
+                <Verify size={14} className="text-trust" />
+                <span>Run 84-Invariant Security Verification Suite</span>
+              </Command.Item>
+              <Command.Item
+                onSelect={() => handleSelect(() => navigate("chunks"))}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
+              >
+                <Refresh size={14} className="text-muted-foreground" />
                 <span>Inspect Canonical Chunk Store</span>
               </Command.Item>
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("audit"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                <Verify size={14} className="text-permit" />
                 <span>Verify Cryptographic Audit Hash Chain</span>
               </Command.Item>
             </Command.Group>
 
             {/* Navigation */}
-            <Command.Group heading="Navigation" className="text-[10px] font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">
+            <Command.Group
+              heading="Navigation"
+              className="text-[10.5px] font-medium text-muted-foreground px-2 py-1 tracking-tight"
+            >
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("chat"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                <Ask size={14} className="text-muted-foreground" />
                 <span>Chat Workspace</span>
               </Command.Item>
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("sources"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <FileText className="h-4 w-4 text-muted-foreground" />
+                <Sheet size={14} className="text-muted-foreground" />
                 <span>Knowledge Sources</span>
               </Command.Item>
               <Command.Item
-                onSelect={() => handleSelect(() => navigate("access"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                onSelect={() => handleSelect(() => navigate("vaults"))}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <KeyRound className="h-4 w-4 text-muted-foreground" />
+                <Compartment size={14} className="text-muted-foreground" />
+                <span>Security Compartments</span>
+              </Command.Item>
+              <Command.Item
+                onSelect={() => handleSelect(() => navigate("access"))}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
+              >
+                <Grant size={14} className="text-muted-foreground" />
                 <span>Access & Grants</span>
               </Command.Item>
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("federation"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <Network className="h-4 w-4 text-muted-foreground" />
+                <Mesh size={14} className="text-muted-foreground" />
                 <span>LAN Federation</span>
               </Command.Item>
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("audit"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <History className="h-4 w-4 text-muted-foreground" />
-                <span>Audit Trail</span>
+                <Ledger size={14} className="text-muted-foreground" />
+                <span>Audit Ledger</span>
+              </Command.Item>
+              <Command.Item
+                onSelect={() => handleSelect(() => navigate("tests"))}
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
+              >
+                <Verify size={14} className="text-trust" />
+                <span>Security Invariants & Tests</span>
               </Command.Item>
               <Command.Item
                 onSelect={() => handleSelect(() => navigate("settings"))}
-                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
               >
-                <Settings className="h-4 w-4 text-muted-foreground" />
+                <Tune size={14} className="text-muted-foreground" />
                 <span>Settings</span>
               </Command.Item>
             </Command.Group>
 
             {/* Switch Personas */}
-            <Command.Group heading="Switch Demo Persona" className="text-[10px] font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">
+            <Command.Group
+              heading="Switch Demo Persona"
+              className="text-[10.5px] font-medium text-muted-foreground px-2 py-1 tracking-tight"
+            >
               {DEMO_PERSONAS.map((p) => (
                 <Command.Item
                   key={p.username}
                   onSelect={() => handleSelect(() => switchPersona(p.username))}
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
+                  className="flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-secondary cursor-pointer text-foreground"
                 >
                   <div className="flex items-center gap-2.5">
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    <span>{p.name} ({p.roleTitle})</span>
+                    <People size={14} className="text-muted-foreground" />
+                    <span>
+                      {p.name} ({p.roleTitle})
+                    </span>
                   </div>
                   <span className="font-mono text-[10px] text-muted-foreground">
-                    Level {p.clearanceLevel}
-                  </span>
-                </Command.Item>
-              ))}
-            </Command.Group>
-
-            {/* Switch Vaults */}
-            <Command.Group heading="Authorized Workspaces" className="text-[10px] font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wider">
-              {vaults.map((v) => (
-                <Command.Item
-                  key={v.vault_id}
-                  onSelect={() =>
-                    handleSelect(() => {
-                      setSelectedVault(v)
-                      navigate("chat")
-                    })
-                  }
-                  className="flex items-center justify-between px-2.5 py-1.5 rounded-md hover:bg-secondary cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <ShieldCheck className="h-4 w-4 text-emerald-400" />
-                    <span>{v.display_name}</span>
-                  </div>
-                  <span className="font-mono text-[10px] text-muted-foreground">
-                    Ceiling L{v.classification_ceiling}
+                    L{p.clearanceLevel}
                   </span>
                 </Command.Item>
               ))}
@@ -182,11 +187,6 @@ export const CommandPalette: React.FC = () => {
           </Command.List>
         </Command>
       </div>
-
-      <div
-        className="fixed inset-0 -z-10"
-        onClick={() => setCommandPaletteOpen(false)}
-      />
     </div>
   )
 }

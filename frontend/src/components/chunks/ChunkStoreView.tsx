@@ -29,6 +29,11 @@ import { Button } from "../ui/button"
 import { Input } from "../ui/input"
 import { Badge } from "../ui/badge"
 import { ScrollArea } from "../ui/scroll-area"
+import { Strata } from "../ui/strata"
+import { Seal } from "../ui/seal"
+import { Identicon } from "../ui/identicon"
+import { Glyph, GlyphName } from "../../glyphs"
+import { cn } from "../../lib/utils"
 import {
   Dialog,
   DialogContent,
@@ -110,43 +115,57 @@ export const ChunkStoreView: React.FC = () => {
     const m = modality.toLowerCase()
     if (m === "image") {
       return {
-        label: "IMAGE (Qwen-VL + OCR)",
-        color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/25",
-        badgeColor: "border-indigo-500/30 text-indigo-300 bg-indigo-500/10",
-        icon: ImageIcon,
+        label: "IMAGE",
+        engine: "Qwen-VL + OCR",
+        glyph: "iris" as GlyphName,
+        color: "text-beam bg-beam/10 border-beam/25",
+        badgeColor: "border-beam/30 text-beam bg-beam/10",
+        barColor: "bg-beam",
       }
     }
     if (m === "audio") {
       return {
-        label: "AUDIO (Whisper)",
-        color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/25",
-        badgeColor: "border-emerald-500/30 text-emerald-300 bg-emerald-500/10",
-        icon: AudioIcon,
+        label: "AUDIO",
+        engine: "Whisper",
+        glyph: "wave" as GlyphName,
+        color: "text-trust bg-trust/10 border-trust/25",
+        badgeColor: "border-trust/30 text-trust bg-trust/10",
+        barColor: "bg-trust",
       }
     }
     if (m === "video" || m === "video_audio") {
       return {
-        label: "VIDEO (Vision + Audio)",
-        color: "text-amber-400 bg-amber-500/10 border-amber-500/25",
-        badgeColor: "border-amber-500/30 text-amber-300 bg-amber-500/10",
-        icon: VideoIcon,
+        label: "VIDEO",
+        engine: "Vision + Audio",
+        glyph: "reel" as GlyphName,
+        color: "text-hold bg-hold/10 border-hold/25",
+        badgeColor: "border-hold/30 text-hold bg-hold/10",
+        barColor: "bg-hold",
       }
     }
     if (m === "code") {
       return {
-        label: "SOURCE CODE",
-        color: "text-sky-400 bg-sky-500/10 border-sky-500/25",
-        badgeColor: "border-sky-500/30 text-sky-300 bg-sky-500/10",
-        icon: CodeIcon,
+        label: "CODE",
+        engine: "Tree-sitter",
+        glyph: "brackets" as GlyphName,
+        color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/25",
+        badgeColor: "border-indigo-500/30 text-indigo-300 bg-indigo-500/10",
+        barColor: "bg-indigo-400",
       }
     }
     return {
-      label: "DOCUMENT",
-      color: "text-slate-300 bg-slate-500/10 border-slate-500/25",
+      label: "DOC",
+      engine: "Text",
+      glyph: "sheet" as GlyphName,
+      color: "text-muted-foreground bg-secondary/80 border-border",
       badgeColor: "border-border text-muted-foreground bg-surface-raised",
-      icon: FileText,
+      barColor: "bg-muted-foreground/60",
     }
   }
+
+  // Modality breakdown items
+  const modalityEntries = Object.entries(stats.modalities || {})
+  const totalCountForBar = stats.total_chunks || total || 1
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background">
@@ -155,13 +174,14 @@ export const ChunkStoreView: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                <Database className="h-4.5 w-4.5" />
+              <div className="h-8 w-8 rounded-lg bg-surface-raised border border-border flex items-center justify-center text-foreground">
+                <Glyph name="storage" size={16} />
               </div>
               <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-                Canonical Chunk Store
-                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                  AES-256-GCM Decrypted
+                Canonical Store
+                <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded border border-border bg-surface-raised text-muted-foreground flex items-center gap-1">
+                  <Glyph name="lock" size={11} className="text-trust" />
+                  AES-256-GCM decrypted
                 </span>
               </h1>
             </div>
@@ -178,8 +198,8 @@ export const ChunkStoreView: React.FC = () => {
               className="text-xs h-8 gap-1.5 border-border"
               disabled={loading}
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-              <span>Refresh Chunks</span>
+              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+              <span>Refresh</span>
             </Button>
           </div>
         </div>
@@ -188,60 +208,87 @@ export const ChunkStoreView: React.FC = () => {
         {!isAdmin && (
           <div className="p-3 rounded-lg border border-border bg-surface-raised/40 text-xs flex items-center justify-between gap-2 mt-3">
             <div className="flex items-center gap-2 text-muted-foreground">
-              <ShieldCheck className="h-4 w-4 text-emerald-400 shrink-0" />
+              <Seal state="verified" size={15} />
               <span>
                 Role-scoped view: Showing only chunks authorized for <strong className="text-foreground">{persona.name}</strong> (Clearance Level {persona.clearanceLevel}). Chunks from unshared documents are strictly withheld.
               </span>
             </div>
-            <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground shrink-0">
-              Isolated Storage
+            <Badge variant="outline" className="text-[10px] py-0 text-muted-foreground shrink-0 font-mono">
+              Tenant Isolated
             </Badge>
+          </div>
+        )}
+
+        {/* Modality Breakdown Stacked Bar */}
+        {modalityEntries.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-border/40 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
+              <span className="flex items-center gap-1.5">
+                <Glyph name="mesh" size={12} className="text-trust" />
+                <span>Modality Distribution</span>
+              </span>
+              <span className="tabular-nums">{total} canonical chunks</span>
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-secondary/80 overflow-hidden flex">
+              {modalityEntries.map(([mod, count]) => {
+                const meta = getModalityMeta(mod)
+                const pct = Math.max(2, (count / totalCountForBar) * 100)
+                return (
+                  <div
+                    key={mod}
+                    className={cn("h-full transition-all duration-500", meta.barColor)}
+                    style={{ width: `${pct}%` }}
+                    title={`${mod.toUpperCase()}: ${count} chunks (${Math.round(pct)}%)`}
+                  />
+                )
+              })}
+            </div>
           </div>
         )}
 
         {/* Top Summary Stats */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
-          <div className="p-3 rounded-lg border border-border bg-surface-raised/40">
+          <div className="p-3 rounded-lg border border-border bg-surface-raised">
             <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
               <span>Total Visible Chunks</span>
-              <Layers className="h-3.5 w-3.5 text-emerald-400" />
+              <Layers className="h-3.5 w-3.5 text-trust" />
             </div>
-            <div className="text-xl font-bold text-foreground mt-1 font-mono">
+            <div className="text-xl font-bold text-foreground mt-1 font-mono tabular-nums">
               {stats.total_chunks || total}
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">Across authorized folders</div>
           </div>
 
-          <div className="p-3 rounded-lg border border-border bg-surface-raised/40">
+          <div className="p-3 rounded-lg border border-border bg-surface-raised">
             <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
               <span>Storage Encryption</span>
               <Lock className="h-3.5 w-3.5 text-indigo-400" />
             </div>
-            <div className="text-xl font-bold text-indigo-400 mt-1 font-mono">
+            <div className="text-xl font-bold text-foreground mt-1 font-mono">
               AES-256-GCM
             </div>
-            <div className="text-[10px] text-muted-foreground mt-0.5">Hardware-enforced KEK derivation</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">Hardware KEK derivation</div>
           </div>
 
-          <div className="p-3 rounded-lg border border-border bg-surface-raised/40">
+          <div className="p-3 rounded-lg border border-border bg-surface-raised">
             <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
               <span>Integrity Verification</span>
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+              <Seal state="verified" size={14} />
             </div>
-            <div className="text-xl font-bold text-emerald-400 mt-1 font-mono">
+            <div className="text-xl font-bold text-trust mt-1 font-mono">
               100% SHA-256
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">Zero corruption or drift</div>
           </div>
 
-          <div className="p-3 rounded-lg border border-border bg-surface-raised/40">
+          <div className="p-3 rounded-lg border border-border bg-surface-raised">
             <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
-              <span>Multimodal Modalities</span>
-              <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+              <span>Modality Channels</span>
+              <Sparkles className="h-3.5 w-3.5 text-hold" />
             </div>
-            <div className="text-xl font-bold text-foreground mt-1 font-mono flex items-center gap-1.5">
+            <div className="text-xl font-bold text-foreground mt-1 font-mono flex items-center gap-1.5 tabular-nums">
               <span>{Object.keys(stats.modalities || {}).length || 4}</span>
-              <span className="text-xs font-normal text-muted-foreground">types</span>
+              <span className="text-xs font-normal text-muted-foreground">active</span>
             </div>
             <div className="text-[10px] text-muted-foreground mt-0.5">Audio · Vision · Video · Docs</div>
           </div>
@@ -267,10 +314,10 @@ export const ChunkStoreView: React.FC = () => {
               onChange={(e) => setSelectedVaultSlug(e.target.value)}
               className="w-full text-xs h-8 rounded-md bg-surface-subtle border border-border px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring font-medium"
             >
-              <option value="all">📁 All Knowledge Folders</option>
+              <option value="all">All Compartments</option>
               {vaults.map((v) => (
                 <option key={v.vault_id} value={v.slug}>
-                  📁 {v.display_name} ({v.slug})
+                  {v.display_name} ({v.slug})
                 </option>
               ))}
             </select>
@@ -279,26 +326,26 @@ export const ChunkStoreView: React.FC = () => {
           {/* Modality Filter Chips */}
           <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto py-1">
             {[
-              { id: "all", label: "All Chunks", icon: Layers },
-              { id: "image", label: "Images", icon: ImageIcon },
-              { id: "audio", label: "Audio", icon: AudioIcon },
-              { id: "video", label: "Video", icon: VideoIcon },
-              { id: "document", label: "Docs", icon: FileText },
-              { id: "code", label: "Code", icon: CodeIcon },
+              { id: "all", label: "ALL", glyph: "layers" as GlyphName },
+              { id: "image", label: "IMAGE", glyph: "iris" as GlyphName },
+              { id: "audio", label: "AUDIO", glyph: "wave" as GlyphName },
+              { id: "video", label: "VIDEO", glyph: "reel" as GlyphName },
+              { id: "document", label: "DOC", glyph: "sheet" as GlyphName },
+              { id: "code", label: "CODE", glyph: "brackets" as GlyphName },
             ].map((m) => {
-              const Icon = m.icon
               const isSelected = selectedModality === m.id
               return (
                 <button
                   key={m.id}
                   onClick={() => setSelectedModality(m.id)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors border ${
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium whitespace-nowrap transition-colors border",
                     isSelected
-                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                      : "bg-surface-raised/40 text-muted-foreground border-border/60 hover:text-foreground hover:bg-surface-raised"
-                  }`}
+                      ? "bg-foreground text-background border-foreground font-semibold"
+                      : "bg-surface-raised text-muted-foreground border-border hover:text-foreground"
+                  )}
                 >
-                  <Icon className="h-3 w-3" />
+                  <Glyph name={m.glyph} size={12} />
                   <span>{m.label}</span>
                 </button>
               )
@@ -311,9 +358,9 @@ export const ChunkStoreView: React.FC = () => {
       <div className="flex-1 overflow-y-auto p-6 min-h-0">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-64 text-center">
-            <RefreshCw className="h-8 w-8 text-emerald-400 animate-spin mb-3" />
+            <RefreshCw className="h-8 w-8 text-trust animate-spin mb-3" />
             <p className="text-sm font-medium text-foreground">Decrypting and loading canonical chunks...</p>
-            <p className="text-xs text-muted-foreground mt-1">Verifying SHA-256 integrity and HKDF key derivation</p>
+            <p className="text-xs text-muted-foreground mt-1 font-mono">Verifying SHA-256 integrity and HKDF key derivation</p>
           </div>
         ) : chunks.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-center p-6 border border-dashed border-border rounded-xl bg-surface/30">
@@ -342,48 +389,46 @@ export const ChunkStoreView: React.FC = () => {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center justify-between text-xs text-muted-foreground font-mono">
-              <span>Showing {chunks.length} of {total} chunks</span>
+              <span className="tabular-nums">Showing {chunks.length} of {total} chunks</span>
               <span>Sorted by Creation Date (Newest first)</span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {chunks.map((chunk) => {
                 const meta = getModalityMeta(chunk.modality)
-                const Icon = meta.icon
 
                 return (
                   <div
                     key={chunk.chunk_id}
-                    className="flex flex-col justify-between p-4 rounded-xl border border-border/80 bg-surface-raised/40 hover:bg-surface-raised/70 transition-all shadow-sm hover:border-emerald-500/30 group"
+                    className="flex flex-col justify-between p-4 rounded-xl border border-border bg-surface-raised hover:border-border/80 transition-all shadow-xs group"
                   >
                     <div>
                       {/* Top Header of Card */}
                       <div className="flex items-start justify-between gap-2 mb-2.5">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <div className={`h-6 w-6 rounded-md flex items-center justify-center border ${meta.color}`}>
-                            <Icon className="h-3.5 w-3.5" />
+                          <div className={cn("h-6 w-6 rounded-md flex items-center justify-center border", meta.color)}>
+                            <Glyph name={meta.glyph} size={13} />
                           </div>
-                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-medium ${meta.badgeColor}`}>
+                          <span className={cn("text-[10px] font-mono px-1.5 py-0.5 rounded border font-medium", meta.badgeColor)}>
                             {meta.label}
                           </span>
-                          <Badge variant="clearance" className="text-[9px] py-0 px-1 font-mono">
-                            L{chunk.classification}
-                          </Badge>
+                          <Strata level={chunk.classification} size="sm" />
                           {chunk.is_encrypted && (
-                            <span className="text-[9px] font-mono px-1 py-0.2 rounded border border-emerald-500/30 text-emerald-400 bg-emerald-500/5 flex items-center gap-1">
-                              <Lock className="h-2.5 w-2.5" />
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border border-border text-muted-foreground bg-surface flex items-center gap-1">
+                              <Lock className="h-2.5 w-2.5 text-trust" />
                               AES-256
                             </span>
                           )}
                           {chunk.integrity_verified && (
-                            <span className="text-[9px] font-mono px-1 py-0.2 rounded border border-emerald-500/30 text-emerald-400 bg-emerald-500/5 flex items-center gap-1">
-                              <CheckCircle2 className="h-2.5 w-2.5" />
-                              SHA-256 OK
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border border-trust/30 text-trust bg-trust/5 flex items-center gap-1">
+                              <Seal state="verified" size={11} />
+                              SHA-256
                             </span>
                           )}
                         </div>
 
-                        <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                        <div className="flex items-center gap-1.5">
+                          <Identicon hash={chunk.content_hash} size={14} title={`Hash: ${chunk.content_hash}`} />
                           <Button
                             size="sm"
                             variant="ghost"
@@ -414,7 +459,7 @@ export const ChunkStoreView: React.FC = () => {
                           {chunk.timestamp && (
                             <>
                               <span>•</span>
-                              <span className="text-emerald-400 flex items-center gap-0.5">
+                              <span className="text-trust flex items-center gap-0.5">
                                 <Clock className="h-2.5 w-2.5" />
                                 {chunk.timestamp}
                               </span>
@@ -423,8 +468,8 @@ export const ChunkStoreView: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Content Preview */}
-                      <div className="p-3 rounded-lg bg-surface-subtle/80 border border-border/60 text-xs text-foreground/90 font-mono leading-relaxed line-clamp-4 break-words">
+                      {/* Content Preview (3-line clamp) */}
+                      <div className="p-3 rounded-lg bg-surface border border-border text-xs text-foreground/90 font-mono leading-relaxed line-clamp-3 break-words">
                         {chunk.content}
                       </div>
 
@@ -432,7 +477,7 @@ export const ChunkStoreView: React.FC = () => {
                       {chunk.media_url && (
                         <div className="mt-2.5">
                           {chunk.modality === "image" ? (
-                            <div className="relative group/img overflow-hidden rounded-lg border border-border/70 max-h-36 bg-black/40">
+                            <div className="relative group/img overflow-hidden rounded-lg border border-border max-h-36 bg-black/40">
                               <img
                                 src={chunk.media_url}
                                 alt={chunk.resource_title}
@@ -443,7 +488,7 @@ export const ChunkStoreView: React.FC = () => {
                             <audio
                               controls
                               src={chunk.media_url}
-                              className="w-full h-8 mt-1 rounded bg-surface-subtle"
+                              className="w-full h-8 mt-1 rounded bg-surface"
                             />
                           ) : null}
                         </div>
@@ -454,11 +499,11 @@ export const ChunkStoreView: React.FC = () => {
                     <div className="mt-3 pt-2.5 border-t border-border/50 flex items-center justify-between text-[10px] text-muted-foreground">
                       <div className="flex items-center gap-2 font-mono truncate max-w-[65%]">
                         <span className="truncate" title={`Chunk ID: ${chunk.chunk_id}`}>
-                          ID: {chunk.chunk_id}
+                          ID: {chunk.chunk_id.slice(0, 12)}...
                         </span>
                         <span>•</span>
                         <span className="truncate" title={`Hash: ${chunk.content_hash}`}>
-                          Hash: {chunk.content_hash.slice(0, 10)}...
+                          {chunk.content_hash.slice(0, 8)}...
                         </span>
                       </div>
 
@@ -467,7 +512,7 @@ export const ChunkStoreView: React.FC = () => {
                           size="sm"
                           variant="ghost"
                           onClick={() => handleAskChunk(chunk)}
-                          className="h-6 px-2 text-[10px] gap-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-medium"
+                          className="h-6 px-2 text-[10px] gap-1 text-foreground hover:bg-surface font-medium"
                         >
                           <MessageSquare className="h-3 w-3" />
                           <span>Chat</span>
@@ -493,14 +538,14 @@ export const ChunkStoreView: React.FC = () => {
 
       {/* INSPECT CHUNK DETAIL MODAL */}
       <Dialog open={!!inspectChunk} onOpenChange={(open) => !open && setInspectChunk(null)}>
-        <DialogContent className="max-w-2xl bg-surface-raised border-border text-foreground shadow-2xl p-6 max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-2xl bg-surface-raised border border-border text-foreground shadow-2xl p-6 max-h-[85vh] flex flex-col">
           {inspectChunk && (
             <>
               <DialogHeader className="pb-3 border-b border-border/40 shrink-0">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                      <Database className="h-4 w-4" />
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-8 w-8 rounded-lg bg-surface border border-border flex items-center justify-center text-foreground">
+                      <Glyph name="storage" size={16} />
                     </div>
                     <div>
                       <DialogTitle className="text-base font-semibold">
@@ -511,34 +556,32 @@ export const ChunkStoreView: React.FC = () => {
                       </DialogDescription>
                     </div>
                   </div>
-                  <Badge variant="clearance" className="font-mono">
-                    Clearance L{inspectChunk.classification}
-                  </Badge>
+                  <Strata level={inspectChunk.classification} size="sm" />
                 </div>
               </DialogHeader>
 
               <ScrollArea className="flex-1 pr-3 py-2 space-y-4">
                 {/* Cryptographic Badges */}
                 <div className="flex items-center gap-2 flex-wrap pt-2">
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-400 bg-emerald-500/10 flex items-center gap-1">
-                    <Lock className="h-3 w-3" />
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground bg-surface flex items-center gap-1">
+                    <Lock className="h-3 w-3 text-trust" />
                     AES-256-GCM Hardware Encrypted
                   </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-400 bg-emerald-500/10 flex items-center gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    SHA-256 Verified (Integrity Intact)
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-trust/30 text-trust bg-trust/10 flex items-center gap-1">
+                    <Seal state="verified" size={12} />
+                    SHA-256 Verified
                   </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 uppercase">
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground bg-surface uppercase">
                     Modality: {inspectChunk.modality}
                   </span>
                 </div>
 
                 {/* Media Preview if present */}
                 {inspectChunk.media_url && (
-                  <div className="p-3 rounded-lg border border-border bg-surface-subtle/50 space-y-2">
+                  <div className="p-3 rounded-lg border border-border bg-surface space-y-2">
                     <div className="text-xs font-semibold text-foreground">Attached Canonical Media:</div>
                     {inspectChunk.modality === "image" ? (
-                      <div className="rounded-lg overflow-hidden border border-border/80 bg-black/60 max-h-72 flex items-center justify-center">
+                      <div className="rounded-lg overflow-hidden border border-border bg-black/60 max-h-72 flex items-center justify-center">
                         <img
                           src={inspectChunk.media_url}
                           alt="Canonical asset"
@@ -561,10 +604,10 @@ export const ChunkStoreView: React.FC = () => {
                       size="sm"
                       variant="ghost"
                       onClick={() => copyToClipboard(inspectChunk.content, "Decrypted Content")}
-                      className="text-xs h-6 gap-1 px-2 text-emerald-400 hover:text-emerald-300"
+                      className="text-xs h-6 gap-1 px-2 text-foreground hover:bg-surface"
                     >
                       {copiedField === "Decrypted Content" ? (
-                        <Check className="h-3 w-3" />
+                        <Check className="h-3 w-3 text-trust" />
                       ) : (
                         <Copy className="h-3 w-3" />
                       )}
@@ -582,31 +625,34 @@ export const ChunkStoreView: React.FC = () => {
                     Cryptographic & Provenance Details:
                   </label>
                   <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                    <div className="p-2 rounded bg-surface-subtle/70 border border-border/50">
+                    <div className="p-2.5 rounded-lg bg-surface border border-border">
                       <div className="text-[10px] text-muted-foreground uppercase">Chunk Index</div>
-                      <div className="font-semibold text-foreground mt-0.5">
+                      <div className="font-semibold text-foreground mt-0.5 tabular-nums">
                         #{inspectChunk.chunk_index}
                       </div>
                     </div>
-                    <div className="p-2 rounded bg-surface-subtle/70 border border-border/50">
+                    <div className="p-2.5 rounded-lg bg-surface border border-border">
                       <div className="text-[10px] text-muted-foreground uppercase">Locator / Span</div>
                       <div className="font-semibold text-foreground mt-0.5">
                         {inspectChunk.locator}
                       </div>
                     </div>
-                    <div className="p-2 rounded bg-surface-subtle/70 border border-border/50 col-span-2">
-                      <div className="text-[10px] text-muted-foreground uppercase">Content SHA-256 Hash</div>
-                      <div className="text-[11px] font-semibold text-emerald-400 mt-0.5 break-all select-all">
+                    <div className="p-2.5 rounded-lg bg-surface border border-border col-span-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-muted-foreground uppercase">Content SHA-256 Hash</span>
+                        <Identicon hash={inspectChunk.content_hash} size={14} />
+                      </div>
+                      <div className="text-[11px] font-semibold text-trust mt-1 break-all select-all">
                         {inspectChunk.content_hash}
                       </div>
                     </div>
-                    <div className="p-2 rounded bg-surface-subtle/70 border border-border/50">
+                    <div className="p-2.5 rounded-lg bg-surface border border-border">
                       <div className="text-[10px] text-muted-foreground uppercase">Resource ID</div>
                       <div className="font-semibold text-foreground mt-0.5 truncate">
                         {inspectChunk.resource_id}
                       </div>
                     </div>
-                    <div className="p-2 rounded bg-surface-subtle/70 border border-border/50">
+                    <div className="p-2.5 rounded-lg bg-surface border border-border">
                       <div className="text-[10px] text-muted-foreground uppercase">Vault Compartment</div>
                       <div className="font-semibold text-foreground mt-0.5 truncate">
                         {inspectChunk.vault_name} ({inspectChunk.vault_slug})
@@ -621,7 +667,7 @@ export const ChunkStoreView: React.FC = () => {
                   size="sm"
                   variant="outline"
                   onClick={() => setInspectChunk(null)}
-                  className="text-xs h-8"
+                  className="text-xs h-8 border-border"
                 >
                   Close
                 </Button>
@@ -631,7 +677,7 @@ export const ChunkStoreView: React.FC = () => {
                     handleAskChunk(inspectChunk)
                     setInspectChunk(null)
                   }}
-                  className="text-xs h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
+                  className="text-xs h-8 gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                   <span>Start Chat With This File</span>
@@ -644,3 +690,4 @@ export const ChunkStoreView: React.FC = () => {
     </div>
   )
 }
+

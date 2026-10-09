@@ -14,6 +14,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../ui/dialog"
 import { Button } from "../ui/button"
 import { Badge } from "../ui/badge"
+import { EngineChip } from "../ui/engine-chip"
 import { api } from "../../lib/api"
 import { toast } from "sonner"
 
@@ -137,7 +138,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             <label htmlFor="multimodal-upload" className="cursor-pointer block">
               {renderCategoryIcon()}
               {file ? (
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center justify-center gap-2">
                     <p className="font-medium text-foreground text-xs truncate max-w-xs">
                       {file.name}
@@ -149,14 +150,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   <p className="text-[11px] text-muted-foreground font-mono">
                     {(file.size / 1024).toFixed(1)} KB
                   </p>
-                  <div className="pt-1 flex items-center justify-center gap-1.5 text-[11px]">
-                    <span className="text-muted-foreground">Assigned AI Engine:</span>
-                    <span className="font-semibold text-emerald-400 font-mono">
-                      {category === "audio" && "🎙️ Whisper Base (Speech-to-Text)"}
-                      {category === "image" && "👁️ Qwen 2.5-VL 3B (Vision & OCR)"}
-                      {category === "video" && "🎬 Whisper + Qwen-VL (Video AI)"}
-                      {(category === "document" || category === "code") && "💬 Gemma 3 4B (Structure Parser)"}
-                    </span>
+                  <div className="pt-1 flex items-center justify-center">
+                    <EngineChip fileName={file.name} />
                   </div>
                 </div>
               ) : (
@@ -232,7 +227,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             size="sm"
             onClick={handleUpload}
             disabled={!file || isUploading}
-            className="text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white"
+            className="text-xs gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium"
           >
             {isUploading ? (
               <>

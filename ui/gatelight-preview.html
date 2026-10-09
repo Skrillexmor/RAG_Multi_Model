@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gatelight: design system preview for PrivateRAG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ───────── tokens (Chalk is the base; Steel overrides) ───────── */
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:oklch(0.982 0.003 250); --surface:oklch(0.965 0.004 250); --raised:oklch(0.997 0.002 250);
+  --subtle:oklch(0.945 0.005 250); --accent:oklch(0.92 0.006 250); --line:oklch(0.89 0.006 250);
+  --ink:oklch(0.20 0.014 255); --ink2:oklch(0.47 0.014 255); --ink3:oklch(0.54 0.012 255);
+  --permit:oklch(0.50 0.12 170); --deny:oklch(0.53 0.19 22); --hold:oklch(0.545 0.135 70);
+  --trust:oklch(0.49 0.12 258); --beam:oklch(0.52 0.09 200);
+  --shadow-float:0 18px 40px -18px rgb(20 30 40 / .22);
+  --hi:inset 0 -1px 0 rgb(0 0 0 / .04);
+  --ease-out:cubic-bezier(.16,1,.3,1); --ease-inout:cubic-bezier(.65,0,.35,1);
+  --ease-spring:linear(0,.18 5%,.62 12%,.94 20%,1.06 28%,1.07 33%,1.02 45%,.99 60%,1);
+  --font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:oklch(0.175 0.013 250); --surface:oklch(0.205 0.014 250); --raised:oklch(0.236 0.015 250);
+    --subtle:oklch(0.272 0.016 250); --accent:oklch(0.302 0.016 250); --line:oklch(0.345 0.016 250);
+    --ink:oklch(0.958 0.008 85); --ink2:oklch(0.765 0.014 250); --ink3:oklch(0.665 0.014 250);
+    --permit:oklch(0.80 0.125 170); --deny:oklch(0.70 0.18 20); --hold:oklch(0.83 0.14 82);
+    --trust:oklch(0.78 0.11 255); --beam:oklch(0.93 0.07 195);
+    --shadow-float:0 24px 56px -20px rgb(0 0 0 / .7); --hi:inset 0 1px 0 rgb(255 255 255 / .05);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+    --bg:oklch(0.175 0.013 250); --surface:oklch(0.205 0.014 250); --raised:oklch(0.236 0.015 250);
+    --subtle:oklch(0.272 0.016 250); --accent:oklch(0.302 0.016 250); --line:oklch(0.345 0.016 250);
+    --ink:oklch(0.958 0.008 85); --ink2:oklch(0.765 0.014 250); --ink3:oklch(0.665 0.014 250);
+    --permit:oklch(0.80 0.125 170); --deny:oklch(0.70 0.18 20); --hold:oklch(0.83 0.14 82);
+    --trust:oklch(0.78 0.11 255); --beam:oklch(0.93 0.07 195);
+    --shadow-float:0 24px 56px -20px rgb(0 0 0 / .7); --hi:inset 0 1px 0 rgb(255 255 255 / .05);
+    color-scheme:dark;
+}
+html{scroll-padding-top:calc(72px + env(safe-area-inset-top,0px));scroll-behavior:smooth}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 14px/1.55 var(--font);font-feature-settings:"ss01","cv11";-webkit-font-smoothing:antialiased}
+::selection{background:color-mix(in oklch,var(--beam) 28%,transparent)}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--trust);outline-offset:2px;border-radius:6px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums}
+.wrap{max-width:1120px;margin:0 auto;padding:0 clamp(16px,4vw,32px)}
+
+/* ───────── glyphs ───────── */
+.glyph{display:inline-block;vertical-align:middle;flex:none;fill:none;stroke:currentColor;stroke-width:var(--gs,1.5);stroke-linecap:round;stroke-linejoin:round}
+.glyph .b{stroke:var(--glyph-accent,currentColor)}
+.glyph circle.b{fill:var(--glyph-accent,currentColor)}
+.glyph .b{transform-box:fill-box;transform-origin:center}
+.hov:hover .glyph .b,button:hover>.glyph .b{animation:beam-nudge .5s var(--ease-out)}
+.glyph.is-busy .b{animation:beam-orbit 1.1s linear infinite;transform-box:view-box;transform-origin:12px 12px}
+@keyframes beam-nudge{40%{transform:translate(.7px,-.7px) scale(1.3)}}
+@keyframes beam-orbit{to{transform:rotate(360deg)}}
+
+/* ───────── header ───────── */
+header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;background:color-mix(in oklch,var(--bg) 82%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid transparent}
+header.top.scrolled{border-color:var(--line)}
+.top .wrap{display:flex;align-items:center;gap:16px;height:56px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:-.012em;font-size:15px;text-decoration:none;color:var(--ink);background:none;border:0;padding:0}
+.brand .tag{font:500 10.5px/1 var(--mono);color:var(--ink3);border-left:1px solid var(--line);padding-left:10px;letter-spacing:.06em}
+.brand .glyph{--glyph-accent:var(--beam);width:22px;height:22px}
+.brand:hover .glyph .b{animation:lap .8s var(--ease-inout)}
+@keyframes lap{to{transform:rotate(360deg)}}
+.top nav{display:flex;gap:2px;margin-left:12px;overflow-x:auto;scrollbar-width:none}
+.top nav a{color:var(--ink2);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:13px;white-space:nowrap}
+.top nav a:hover{background:var(--subtle);color:var(--ink)}
+.spacer{flex:1}
+.tool{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:9px;border:0;background:var(--raised);box-shadow:0 0 0 1px var(--line),var(--hi);font-size:12.5px;color:var(--ink2)}
+.tool:hover{color:var(--ink);background:var(--subtle)}
+.tool[aria-pressed="true"]{color:var(--ink);box-shadow:0 0 0 1px var(--trust)}
+.tool .glyph{width:15px;height:15px}
+@media (max-width:820px){.top nav{display:none}}
+
+/* ───────── hero ───────── */
+.hero{padding:clamp(40px,8vw,88px) 0 24px}
+.hero h1{font-weight:300;font-size:clamp(34px,6.4vw,68px);line-height:1.02;letter-spacing:-.04em;margin:0;max-width:15ch;text-wrap:balance}
+.hero p.lede{color:var(--ink2);font-size:16px;max-width:56ch;margin:20px 0 0;text-wrap:pretty}
+
+/* ───────── generic surfaces ───────── */
+.card{background:var(--raised);border-radius:14px;box-shadow:0 0 0 1px var(--line),var(--hi)}
+.sealed{box-shadow:0 0 0 1px var(--line),inset 0 0 0 1px color-mix(in oklch,var(--beam) 12%,transparent),inset 0 1px 0 color-mix(in oklch,var(--beam) 22%,transparent)}
+section{padding:56px 0 8px}
+section>.wrap>header.sec{display:grid;gap:6px;margin-bottom:22px;max-width:62ch}
+h2{font-weight:300;font-size:clamp(26px,3.6vw,34px);letter-spacing:-.03em;line-height:1.12;margin:0;text-wrap:balance}
+header.sec p{margin:0;color:var(--ink2);text-wrap:pretty}
+.quiet{font-size:11.5px;font-weight:500;color:var(--ink3);letter-spacing:.01em}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.seg{display:inline-flex;position:relative;padding:3px;background:var(--subtle);border-radius:10px;gap:0}
+.seg button{position:relative;z-index:1;border:0;background:none;padding:6px 12px;border-radius:8px;font-size:12.5px;color:var(--ink2);display:inline-flex;align-items:center;gap:7px;transition:color .14s}
+.seg button[aria-checked="true"]{color:var(--ink)}
+.seg .thumb{position:absolute;z-index:0;top:3px;bottom:3px;left:0;border-radius:8px;background:var(--raised);box-shadow:0 0 0 1px var(--line),0 1px 2px rgb(0 0 0 / .12);transition:transform .26s var(--ease-spring),width .26s var(--ease-spring)}
+.btn{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border-radius:9px;border:0;background:var(--ink);color:var(--bg);font-weight:500;font-size:13px;box-shadow:var(--hi)}
+.btn:active{transform:scale(.98)}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.btn.ghost:hover{background:var(--subtle)}
+.btn .glyph{width:16px;height:16px}
+.btn[disabled]{opacity:.45;pointer-events:none}
+.hold-btn{background:transparent;color:var(--hold);box-shadow:0 0 0 1px color-mix(in oklch,var(--hold) 45%,transparent)}
+.hold-btn:hover{background:color-mix(in oklch,var(--hold) 10%,transparent)}
+
+/* status chips: glyph + word + color */
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px 0 7px;border-radius:7px;font-size:12px;font-weight:500;background:color-mix(in oklch,var(--c) 11%,transparent);color:var(--c);box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--c) 26%,transparent)}
+.chip .glyph{width:14px;height:14px;--glyph-accent:var(--c)}
+.chip.permit{--c:var(--permit)}.chip.deny{--c:var(--deny)}.chip.hold{--c:var(--hold)}.chip.trust{--c:var(--trust)}.chip.mute{--c:var(--ink2)}
+
+/* strata chip */
+.strata{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 8px;border-radius:7px;background:var(--subtle);font:500 11.5px/1 var(--mono);color:var(--ink2)}
+.strata i{display:flex;gap:2px;align-items:flex-end}
+.strata b{display:block;width:3px;height:10px;border-radius:1.5px;background:transparent;box-shadow:inset 0 0 0 1px var(--line)}
+.strata b.on{background:var(--ink);box-shadow:none}
+.strata b.gap{background:repeating-linear-gradient(135deg,color-mix(in oklch,var(--hold) 60%,transparent) 0 2px,transparent 2px 4px);box-shadow:inset 0 0 0 1px var(--hold)}
+.strata.lg{height:auto;padding:12px 14px;gap:14px;font-size:13px}
+.strata.lg b{width:12px;height:34px;border-radius:3px}
+.strata.lg i{gap:5px}
+
+/* ───────── hero demo: gate path ───────── */
+.stage{margin-top:36px;display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.stage{grid-template-columns:1fr}}
+.ask{padding:18px;display:grid;gap:16px}
+.ask h3{margin:0;font-size:13px;font-weight:600;letter-spacing:-.005em}
+.persona{display:grid;gap:6px}
+.persona button{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:0;background:transparent;border-radius:10px;padding:9px 10px;box-shadow:0 0 0 1px transparent;transition:background .14s,box-shadow .14s}
+.persona button:hover{background:var(--subtle)}
+.persona button[aria-checked="true"]{background:var(--subtle);box-shadow:0 0 0 1px var(--line)}
+.avatar{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:600;font-size:13px;background:color-mix(in oklch,var(--beam) 14%,var(--subtle));color:var(--ink)}
+.persona .meta{display:grid;line-height:1.25}
+.persona .meta small{color:var(--ink3);font-size:11.5px}
+.persona .strata{margin-left:auto}
+.q{display:grid;gap:6px}
+.q button{border:0;text-align:left;background:var(--subtle);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--ink);box-shadow:inset 0 0 0 1px transparent}
+.q button[aria-checked="true"]{box-shadow:inset 0 0 0 1px var(--trust);background:color-mix(in oklch,var(--trust) 8%,var(--subtle))}
+.sim{font-size:11.5px;color:var(--ink3);margin:0}
+
+.run{padding:0;overflow:hidden}
+.path{list-style:none;margin:0;padding:22px 22px 8px;display:grid;grid-template-columns:repeat(8,1fr);gap:0}
+.path li{position:relative;display:grid;gap:8px;justify-items:start;padding-right:6px;font-size:12px;color:var(--ink3);min-width:0}
+.path li .n{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--line);background:var(--raised);position:relative;z-index:1;transition:box-shadow .2s,background .2s}
+.path li::before{content:"";position:absolute;left:12px;right:0;top:5.25px;height:1.5px;background:var(--line);z-index:0}
+.path li::after{content:"";position:absolute;left:12px;top:5.25px;height:1.5px;width:0;background:var(--c,var(--beam));z-index:0;transition:width .3s var(--ease-out)}
+.path li:last-child::before,.path li:last-child::after{display:none}
+.path li.gate .n{width:14px;height:14px;margin:-1px 0 -1px -1px;border-radius:4px;transform:rotate(45deg)}
+.path li.active .n{box-shadow:inset 0 0 0 1.5px var(--beam);animation:pulse 1s var(--ease-inout) infinite}
+.path li.done{color:var(--ink)}
+.path li.done .n{background:var(--c,var(--permit));box-shadow:none}
+.path li.done::after{width:calc(100% - 12px)}
+.path li.blocked{color:var(--deny);--c:var(--deny)}
+.path li.blocked .n{background:var(--deny);box-shadow:none}
+.path li.skipped{opacity:.45}
+.path li .t{font-weight:500;line-height:1.2}
+.path li .v{font:500 11.5px/1 var(--mono);color:var(--ink3);min-height:12px;font-variant-numeric:tabular-nums}
+.path li.done .v{color:var(--ink2)}
+@keyframes pulse{50%{box-shadow:inset 0 0 0 1.5px var(--beam),0 0 0 5px color-mix(in oklch,var(--beam) 22%,transparent)}}
+@media (max-width:760px){
+  .path{grid-template-columns:1fr;gap:14px;padding:20px}
+  .path li{grid-template-columns:14px 1fr auto;align-items:center;gap:12px}
+  .path li::before,.path li::after{display:none}
+}
+.funnel{padding:6px 22px 18px;display:grid;gap:8px}
+.funnel .bars{display:grid;gap:6px}
+.funnel .bar{height:10px;border-radius:5px;background:var(--subtle);position:relative;overflow:hidden}
+.funnel .bar>span{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:5px;transition:width .6s var(--ease-out)}
+.funnel .a>span{background:var(--trust)}
+.funnel .b>span{background:var(--permit)}
+.funnel .x{height:10px;border-radius:5px;background:repeating-linear-gradient(135deg,var(--line) 0 3px,transparent 3px 6px)}
+.funnel .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+.funnel .legend span{display:inline-flex;gap:6px;align-items:baseline}
+.funnel .legend b{font:500 13px/1 var(--mono);color:var(--ink)}
+.out{border-top:1px solid var(--line);padding:22px;min-height:230px}
+.out.idle{display:grid;place-items:center;color:var(--ink3);text-align:center}
+.out .glyph.big{width:34px;height:34px;--glyph-accent:var(--beam);animation:none}
+.answer-head{display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:13px}
+.answer-head .glyph{width:17px;height:17px;--glyph-accent:var(--beam)}
+.answer-head strong{font-weight:600}
+.answer{font-size:15px;line-height:1.65;max-width:62ch;margin:0 0 16px;text-wrap:pretty}
+.claim{border-bottom:1px dotted var(--trust);cursor:default;transition:background .14s;border-radius:3px;padding:0 1px}
+.claim.lit{background:color-mix(in oklch,var(--trust) 14%,transparent)}
+.seal{display:inline-grid;place-items:center;min-width:22px;height:18px;margin:0 2px;padding:0 4px;border:0;border-radius:5px;font:500 11px/1 var(--mono);color:var(--trust);background:color-mix(in oklch,var(--trust) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in oklch,var(--trust) 30%,transparent),inset 0 1px 0 color-mix(in oklch,var(--beam) 30%,transparent);vertical-align:1px;transition:transform .14s}
+.seal:hover,.seal.lit{background:color-mix(in oklch,var(--trust) 24%,transparent)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+.tile{display:flex;gap:11px;text-align:left;border:0;padding:11px;border-radius:12px;background:var(--surface);box-shadow:0 0 0 1px var(--line);transition:box-shadow .14s}
+.tile.lit,.tile:hover{box-shadow:0 0 0 1px var(--trust)}
+.tile .mt{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:color-mix(in oklch,var(--m) 16%,transparent);color:var(--m);flex:none}
+.tile .mt .glyph{width:18px;height:18px;--glyph-accent:var(--m)}
+.tile h4{margin:0;font-size:12.5px;font-weight:600;display:flex;gap:8px;align-items:center}
+.tile q{display:block;margin-top:3px;font-size:12px;color:var(--ink2);quotes:none;font-style:italic;line-height:1.4}
+.rel{height:3px;border-radius:2px;background:var(--subtle);margin-top:8px;overflow:hidden}
+.rel i{display:block;height:100%;background:var(--ink2);border-radius:2px}
+.gatesum{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:16px;font-size:12px;color:var(--ink2)}
+.gatesum b{font:500 12px/1 var(--mono);color:var(--ink)}
+.depth{display:inline-flex;gap:3px;align-items:center}
+.depth i{width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 1.5px var(--trust)}
+.depth i.on{background:var(--trust)}
+
+.refusal{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start}
+.refusal .tileb{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:color-mix(in oklch,var(--deny) 12%,transparent);color:var(--deny)}
+.refusal .tileb .glyph{width:24px;height:24px;--glyph-accent:var(--deny)}
+.refusal.draw .tileb circle{stroke-dasharray:54;stroke-dashoffset:54;animation:draw .5s var(--ease-out) forwards}
+.refusal h3{margin:0 0 4px;font-size:16px;font-weight:600;letter-spacing:-.012em}
+.refusal p{margin:0;color:var(--ink2);max-width:52ch}
+.refusal .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
+@keyframes draw{to{stroke-dashoffset:0}}
+.gapnote{font-size:12px;color:var(--ink2);margin-top:8px}
+
+/* evidence drawer */
+.scrim{position:fixed;inset:0;background:rgb(0 0 0 / .38);opacity:0;pointer-events:none;transition:opacity .22s;z-index:40}
+.scrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(480px,100%);background:var(--raised);box-shadow:-1px 0 0 var(--line),var(--shadow-float);transform:translateX(24px);opacity:0;pointer-events:none;transition:transform .3s var(--ease-out),opacity .22s;z-index:50;padding:calc(22px + env(safe-area-inset-top,0px)) 22px calc(22px + env(safe-area-inset-bottom,0px));overflow:auto}
+.drawer.on{transform:none;opacity:1;pointer-events:auto}
+.drawer h3{margin:0;font-size:20px;font-weight:600;letter-spacing:-.012em}
+.drawer .hd{display:flex;align-items:center;gap:12px;justify-content:space-between;margin-bottom:18px}
+.stamp{width:38px;height:38px;color:var(--trust)}
+.stamp circle.ring{stroke-dasharray:60;stroke-dashoffset:60}
+.drawer.on .stamp circle.ring{animation:draw .52s var(--ease-out) .12s forwards}
+.excerpt{padding:14px;border-radius:12px;background:var(--surface);box-shadow:0 0 0 1px var(--line);font-size:13px;line-height:1.6;margin:8px 0 18px}
+.excerpt mark{background:color-mix(in oklch,var(--trust) 20%,transparent);color:inherit;border-radius:3px;padding:0 1px}
+.kv{border-radius:12px;box-shadow:0 0 0 1px var(--line);overflow:hidden}
+.kv div{display:flex;justify-content:space-between;gap:16px;padding:9px 12px;font-size:12px;border-top:1px solid var(--line);align-items:center}
+.kv div:first-child{border-top:0}
+.kv span:first-child{color:var(--ink2)}
+.identicon{display:inline-grid;grid-template-columns:repeat(5,4px);gap:1px;vertical-align:middle}
+.identicon i{width:4px;height:4px;border-radius:1px;background:transparent}
+.identicon i.on{background:var(--trust)}
+
+/* ───────── palette ───────── */
+.sw{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.sw div{border-radius:12px;padding:12px;min-height:92px;display:grid;align-content:end;gap:2px;font-size:12px;box-shadow:0 0 0 1px var(--line)}
+.sw b{font-weight:600}
+.sw small{font:400 11px/1.3 var(--mono);opacity:.8}
+.vocab{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:16px}
+.vocab .card{padding:14px;display:grid;gap:10px;font-size:12.5px;color:var(--ink2)}
+.rule{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+.rule .card{padding:14px 16px;font-size:13px;color:var(--ink2)}
+.rule b{color:var(--ink);font-weight:600;display:block;margin-bottom:2px}
+
+/* ───────── glyph grid ───────── */
+.gtools{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.gtools label{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--ink2)}
+input[type=range]{accent-color:var(--trust);width:140px}
+.ggrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+.gcell{display:grid;justify-items:center;gap:10px;padding:16px 8px 12px;border:0;border-radius:12px;background:var(--raised);box-shadow:0 0 0 1px var(--line);color:var(--ink);transition:box-shadow .14s}
+.gcell:hover{box-shadow:0 0 0 1px var(--trust)}
+.gcell .glyph{width:var(--gz,24px);height:var(--gz,24px);--glyph-accent:var(--beam)}
+.gcell span{font:400 11px/1 var(--mono);color:var(--ink3)}
+.gcell.copied span{color:var(--permit)}
+.accent-pick{display:flex;gap:6px}
+.accent-pick button{width:22px;height:22px;border-radius:50%;border:0;background:var(--c);box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--line)}
+.accent-pick button[aria-pressed="true"]{box-shadow:0 0 0 2px var(--bg),0 0 0 3.5px var(--ink)}
+
+/* ───────── strata builder & depth dial ───────── */
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.panel{padding:20px;display:grid;gap:16px;align-content:start}
+.panel h3{margin:0;font-size:14px;font-weight:600;letter-spacing:-.005em}
+.panel p{margin:0;color:var(--ink2);font-size:13px}
+.slider{display:grid;grid-template-columns:110px 1fr auto;gap:12px;align-items:center;font-size:12.5px;color:var(--ink2)}
+.slider input{width:100%}
+.slider output{font:500 12px/1 var(--mono);color:var(--ink);min-width:24px;text-align:right}
+.dial-desc{font-size:12.5px;color:var(--ink2);min-height:38px;transition:opacity .14s}
+.meters{display:grid;gap:6px;font-size:11.5px;color:var(--ink3)}
+.meters div{display:grid;grid-template-columns:70px 1fr;align-items:center;gap:10px}
+.meters span.m{height:4px;border-radius:2px;background:var(--subtle);position:relative;overflow:hidden}
+.meters span.m i{position:absolute;inset:0 auto 0 0;background:var(--ink2);border-radius:2px;transition:width .4s var(--ease-out)}
+
+/* ───────── session ring ───────── */
+.ringwrap{display:flex;gap:22px;align-items:center;flex-wrap:wrap}
+.sring{display:inline-flex;align-items:center;gap:10px;height:42px;padding:0 14px 0 8px;border:0;border-radius:12px;background:var(--raised);box-shadow:0 0 0 1px var(--line),var(--hi);transition:box-shadow .2s}
+.sring svg{width:28px;height:28px;transform:rotate(-90deg)}
+.sring .trk{stroke:var(--line)}
+.sring .arc{stroke:var(--beam);transition:stroke-dashoffset .5s linear,stroke .3s}
+.sring[data-s="low"] .arc{stroke:var(--hold)}
+.sring[data-s="warn"]{box-shadow:0 0 0 1px var(--hold);animation:warnpulse 1.2s var(--ease-inout) infinite}
+.sring[data-s="warn"] .arc{stroke:var(--hold)}
+.sring.renew .arc{transition:stroke-dashoffset .4s var(--ease-out)}
+.sring .tm{font:500 14px/1 var(--mono);font-variant-numeric:tabular-nums}
+@keyframes warnpulse{50%{box-shadow:0 0 0 1px var(--hold),0 0 0 6px color-mix(in oklch,var(--hold) 18%,transparent)}}
+
+/* ───────── audit chain ───────── */
+.chain{display:grid;gap:0;position:relative;overflow:hidden;padding:6px 0}
+.blk{display:grid;grid-template-columns:20px 1fr auto auto;gap:14px;align-items:center;padding:9px 18px;font-size:12.5px;border-top:1px solid var(--line);position:relative;transition:background .2s}
+.blk:first-child{border-top:0}
+.blk .lk{width:16px;height:16px;color:var(--ink3);transition:color .2s}
+.blk .lk .glyph{width:16px;height:16px}
+.blk .hs{display:flex;gap:10px;align-items:center;font:400 12px/1 var(--mono);color:var(--ink2)}
+.blk .hs em{font-style:normal;color:var(--ink3)}
+.blk.ok{background:color-mix(in oklch,var(--trust) 5%,transparent)}
+.blk.ok .lk{color:var(--trust)}
+.blk.bad{background:color-mix(in oklch,var(--deny) 9%,transparent)}
+.blk.bad .lk{color:var(--deny)}
+.blk .act{color:var(--ink)}
+.sweep{position:absolute;left:0;right:0;height:2px;top:0;background:linear-gradient(90deg,transparent,var(--beam),transparent);opacity:0;pointer-events:none}
+.sweep.go{opacity:1;transition:transform var(--sd,1.4s) linear;transform:translateY(var(--sy,0))}
+.verdict{display:flex;align-items:center;gap:10px;padding:12px 18px;border-top:1px solid var(--line);font-size:13px;min-height:50px}
+
+/* ───────── matrix ───────── */
+.mx-head{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.mx-count{font-weight:300;font-size:56px;letter-spacing:-.045em;line-height:1;font-variant-numeric:tabular-nums}
+.mx-count small{font-size:22px;color:var(--ink3);letter-spacing:-.02em}
+.mx{display:flex;flex-wrap:wrap;gap:14px 22px;padding:20px}
+.mx .g{display:grid;gap:7px}
+.mx .cells{display:grid;grid-template-columns:repeat(var(--cols,6),14px);gap:4px}
+.mx .cells i{width:14px;height:14px;border-radius:4px;background:var(--subtle);box-shadow:inset 0 0 0 1px var(--line);transition:background .15s,box-shadow .15s,transform .15s;position:relative}
+.mx .cells i.pass{background:var(--permit);box-shadow:none}
+.mx .cells i.fail{background:var(--deny);box-shadow:none}
+.mx .cells i.fail::after{content:"";position:absolute;inset:4px;background:linear-gradient(45deg,transparent 42%,var(--bg) 42% 58%,transparent 58%),linear-gradient(-45deg,transparent 42%,var(--bg) 42% 58%,transparent 58%)}
+.mx .cells i:hover{transform:scale(1.35);z-index:2}
+.mx-tip{height:20px;font-size:12px;color:var(--ink2);padding:0 20px 14px}
+
+/* ───────── federation ───────── */
+.fed{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:stretch}
+@media (max-width:820px){.fed{grid-template-columns:1fr}}
+.fed svg{width:100%;height:auto;display:block}
+.fed .node circle.c{fill:var(--raised);stroke:var(--line);stroke-width:1.5;transition:stroke .14s}
+.fed .node:hover circle.c,.fed .node.sel circle.c{stroke:var(--trust)}
+.fed .node text{font:500 11px var(--font);fill:var(--ink2);text-anchor:middle}
+.fed .node .glyph{color:var(--ink)}
+.fed line.l{stroke:var(--line);stroke-width:1.5}
+.fed line.off{stroke-dasharray:3 4}
+.nodeinfo{padding:20px;display:grid;gap:12px;align-content:start}
+.nodeinfo h3{margin:0;font-size:15px;font-weight:600}
+.nodeinfo dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12.5px}
+.nodeinfo dt{color:var(--ink3)}
+.nodeinfo dd{margin:0;font-family:var(--mono);font-size:12px}
+
+/* ───────── motion lab ───────── */
+.lab{padding:20px;display:grid;gap:16px}
+.track{display:grid;grid-template-columns:150px 1fr 70px;gap:14px;align-items:center;font-size:12.5px}
+.track .rail{height:28px;border-radius:8px;background:var(--subtle);position:relative}
+.track .dot{position:absolute;left:4px;top:4px;width:20px;height:20px;border-radius:50%;background:var(--ink);transition-property:transform;transition-duration:var(--d,600ms)}
+.lab.go .dot{transform:translateX(calc(var(--w,600px) - 28px))}
+.track .ms{font:400 11.5px/1 var(--mono);color:var(--ink3);text-align:right}
+@media (max-width:640px){.track{grid-template-columns:1fr;gap:6px}.track .ms{text-align:left}}
+
+/* ───────── type ───────── */
+.type .card{padding:24px;display:grid;gap:18px}
+.type .d{font-weight:300;font-size:clamp(34px,6vw,56px);letter-spacing:-.04em;line-height:1.04}
+.type .t1{font-weight:300;font-size:28px;letter-spacing:-.03em;line-height:1.15}
+.type .t2{font-weight:600;font-size:20px;letter-spacing:-.012em}
+.type .bl{font-size:15px;line-height:1.65;max-width:62ch;color:var(--ink2)}
+.type .m{font:450 12px/1.5 var(--mono);color:var(--ink2)}
+
+footer{padding:64px 0 80px;color:var(--ink3);font-size:12.5px}
+footer .wrap{display:flex;gap:16px;flex-wrap:wrap;justify-content:space-between}
+
+[data-motion="off"] *,[data-motion="off"] *::before,[data-motion="off"] *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+@media (prefers-reduced-motion:reduce){
+  :root:not([data-motion="on"]) *,:root:not([data-motion="on"]) *::before,:root:not([data-motion="on"]) *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="wrap">
+    <button class="brand" type="button" id="brandBtn" aria-label="PrivateRAG, back to top"><span data-g="aperture"></span>PrivateRAG<span class="tag">DARS</span></button>
+    <nav aria-label="Sections">
+      <a href="#gate">Gate path</a><a href="#color">Color</a><a href="#glyphs">Glyphs</a><a href="#strata">Strata</a><a href="#session">Session</a><a href="#audit">Audit</a><a href="#tests">Tests</a><a href="#mesh">Federation</a><a href="#motion">Motion</a>
+    </nav>
+    <span class="spacer"></span>
+    <button class="tool" id="motionBtn" type="button" aria-pressed="true"><span data-g="pulse"></span><span id="motionLbl">Motion on</span></button>
+    <button class="tool" id="themeBtn" type="button"><span data-g="iris"></span><span id="themeLbl">Steel</span></button>
+  </div>
+</header>
+
+<main>
+<div class="wrap hero" id="gate">
+  <h1>Color appears when the system decides.</h1>
+  <p class="lede">Gatelight is the design system for PrivateRAG, a RAG product where authorization travels with the data. The interface stays steel and ink until a gate opens or closes. Pick who is asking and watch the same question meet the two gates.</p>
+
+  <div class="stage">
+    <div class="card ask">
+      <div>
+        <h3>Who is asking</h3>
+        <div class="persona" role="radiogroup" aria-label="Persona" id="personas"></div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:8px">Question</h3>
+        <div class="q" role="radiogroup" aria-label="Question" id="questions"></div>
+      </div>
+      <button class="btn" id="runBtn" type="button"><span data-g="send"></span>Ask the compartment</button>
+      <p class="sim">Simulated sample data. In the product, every number shown here comes from the real security trace.</p>
+    </div>
+
+    <div class="card run" aria-live="polite">
+      <ol class="path" id="path"></ol>
+      <div class="funnel" id="funnel">
+        <div class="bars">
+          <div class="bar a"><span id="fA"></span></div>
+          <div class="bar b"><span id="fB"></span></div>
+        </div>
+        <div class="legend"><span>Gate A candidates <b id="lA">0</b></span><span>Gate B authorized <b id="lB">0</b></span><span>Excluded <b id="lX">0</b></span></div>
+      </div>
+      <div class="out idle" id="out"><div><span class="glyph-wrap" data-g="aperture" data-class="big"></span><p style="margin:10px 0 0">The answer appears here once both gates have been passed.</p></div></div>
+    </div>
+  </div>
+</div>
+
+<section id="color"><div class="wrap">
+  <header class="sec"><h2>Steel and ink, with four decision colors</h2><p>Chrome, cards and tables never carry color. Verdigris, Garnet, Saffron and Lapis appear only for a permit, a denial, something pending, or a cryptographic fact. Every status also changes its glyph and its word, so color is never the only signal.</p></header>
+  <div class="sw" id="swatches"></div>
+  <div class="vocab">
+    <div class="card"><span class="chip permit"><span data-g="gate-open"></span>Permitted</span>Gate A and Gate B both passed. The aperture is open.</div>
+    <div class="card"><span class="chip deny"><span data-g="gate-closed"></span>Denied</span>Outside clearance or scope. The aperture is closed.</div>
+    <div class="card"><span class="chip hold"><span data-g="session"></span>Pending, 8 min left</span>A just-in-time grant waiting for approval or about to expire.</div>
+    <div class="card"><span class="chip trust"><span data-g="verify"></span>Verified</span>A signature, hash, or exact quote was checked. Always set in Lapis.</div>
+  </div>
+  <div class="rule">
+    <div class="card"><b>One accent for brand moments</b>Beam is the pale cyan dot inside the aperture. It is the logo, the loader, and the glint on sealed surfaces, never a button color.</div>
+    <div class="card"><b>Hairlines, not shadows</b>Cards lift with a 1px ring and a faint inner highlight. Real shadows are reserved for drawers and dialogs.</div>
+    <div class="card"><b>Modality is a quiet tint</b>Document, image, audio, video and code each get a low-chroma tint. The glyph carries identity, so these never compete with the four decision colors.</div>
+  </div>
+</div></section>
+
+<section id="glyphs"><div class="wrap">
+  <header class="sec"><h2>Gatelight glyphs replace all 81 icons and the four emoji</h2><p>Each glyph is built from circles and quarter-arcs with one deliberate gap, the gate opening, and a single beam element in the accent color. Click any glyph to copy its SVG.</p></header>
+  <div class="gtools">
+    <label>Size <input id="gSize" type="range" min="12" max="40" value="24" aria-label="Glyph size"><output id="gSizeO" class="mono">24</output></label>
+    <label>Stroke <input id="gStroke" type="range" min="1" max="2.2" step="0.05" value="1.5" aria-label="Stroke width"><output id="gStrokeO" class="mono">1.5</output></label>
+    <label>Accent <span class="accent-pick" id="accPick"></span></label>
+    <button class="tool" id="busyBtn" type="button" aria-pressed="false"><span data-g="refresh"></span>Busy state</button>
+  </div>
+  <div class="ggrid" id="ggrid"></div>
+</div></section>
+
+<section id="strata"><div class="wrap">
+  <header class="sec"><h2>Clearance you can see</h2><p>Classification levels are five stacked bars. Your clearance lights the bars from the bottom; a compartment's ceiling reaches higher. The hatched gap is exactly what a just-in-time request would unlock.</p></header>
+  <div class="two">
+    <div class="card panel">
+      <h3>Strata chip</h3>
+      <div class="slider"><span>Your clearance</span><input id="sLvl" type="range" min="0" max="4" value="1" aria-label="Your clearance level"><output id="sLvlO">L1</output></div>
+      <div class="slider"><span>Compartment ceiling</span><input id="sCap" type="range" min="1" max="4" value="3" aria-label="Compartment ceiling"><output id="sCapO">L3</output></div>
+      <div class="row" style="gap:18px;align-items:flex-end"><div id="sBig"></div><div id="sSmall" style="display:grid;gap:8px"></div></div>
+      <p id="sNote"></p>
+    </div>
+    <div class="card panel">
+      <h3>Depth dial</h3>
+      <p>Retrieval depth stops being green, blue and purple. One, two or three rings mean a deeper pipeline. The thumb slides on a spring.</p>
+      <div class="seg" id="depth" role="radiogroup" aria-label="Retrieval depth"><span class="thumb"></span></div>
+      <div class="dial-desc" id="depthDesc"></div>
+      <div class="meters" id="depthMeters"></div>
+    </div>
+  </div>
+</div></section>
+
+<section id="session"><div class="wrap">
+  <header class="sec"><h2>The session ring</h2><p>The five-minute inactivity timer becomes a ring that drains. It turns Saffron under a minute and starts breathing at thirty seconds. Renewing refills it clockwise.</p></header>
+  <div class="card panel">
+    <div class="ringwrap">
+      <button class="sring" id="sring" type="button" aria-label="Session time remaining, click to renew"><svg viewBox="0 0 28 28" aria-hidden="true"><circle class="trk" cx="14" cy="14" r="11" fill="none" stroke-width="2.5"/><circle class="arc" cx="14" cy="14" r="11" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="69.115" stroke-dashoffset="0"/></svg><span class="tm" id="stm">05:00</span></button>
+      <div class="row"><button class="btn ghost" id="ff" type="button"><span data-g="session"></span>Skip ahead 30 seconds</button><button class="btn ghost" id="rn" type="button"><span data-g="refresh"></span>Renew session</button></div>
+      <p class="sim" id="sstate" style="max-width:34ch"></p>
+    </div>
+  </div>
+</div></section>
+
+<section id="audit"><div class="wrap">
+  <header class="sec"><h2>A ledger you can watch being verified</h2><p>Each audit event links to the one before it by hash. Verification sweeps down the chain and seals each link. Tamper with a block and the sweep stops at the break.</p></header>
+  <div class="card" style="overflow:hidden">
+    <div class="row" style="padding:16px 18px;border-bottom:1px solid var(--line)"><button class="btn" id="vBtn" type="button"><span data-g="verify"></span>Verify hash chain</button><button class="btn ghost" id="tBtn" type="button" aria-pressed="false"><span data-g="edit"></span>Tamper with block 5</button><span class="quiet" style="margin-left:auto">Fingerprints are drawn from each hash, so two different blocks never look alike.</span></div>
+    <div class="chain" id="chain"><div class="sweep" id="sweep"></div></div>
+    <div class="verdict" id="verdict"><span class="quiet">Not verified yet.</span></div>
+  </div>
+</div></section>
+
+<section id="tests"><div class="wrap">
+  <header class="sec"><h2>84 invariants, one glance</h2><p>The security suite becomes an 84-cell matrix grouped by category. Running it lights each cell as its result arrives. A single failure is impossible to miss.</p></header>
+  <div class="mx-head"><div class="mx-count" id="mxc">0<small> / 84</small></div><button class="btn" id="mxRun" type="button"><span data-g="verify"></span>Run security tests</button><button class="btn ghost" id="mxFail" type="button" aria-pressed="false"><span data-g="alert"></span>Inject one failure</button></div>
+  <div class="card"><div class="mx" id="mx"></div><div class="mx-tip" id="mxTip" aria-live="polite">Hover a cell to read its test.</div></div>
+</div></section>
+
+<section id="mesh"><div class="wrap">
+  <header class="sec"><h2>Federation as a topology</h2><p>Trusted nodes sit on a ring around this machine. A beam travels along each trusted link; offline nodes are dashed and still. Select a node to inspect it.</p></header>
+  <div class="fed">
+    <div class="card" style="padding:14px"><svg viewBox="0 0 520 400" id="fedSvg" role="img" aria-label="LAN topology with one local node and five peers"></svg></div>
+    <div class="card nodeinfo" id="nodeInfo"></div>
+  </div>
+</div></section>
+
+<section id="motion"><div class="wrap">
+  <header class="sec"><h2>Motion that explains</h2><p>Arrivals ease out, morphs ease in and out, and segmented controls use a spring. Fade-and-slide entrances are not applied to every card; motion is reserved for answering an action or showing a decision.</p></header>
+  <div class="card lab" id="lab">
+    <div class="row"><button class="btn" id="playM" type="button"><span data-g="send"></span>Play</button><button class="btn ghost" id="resetM" type="button">Reset</button></div>
+    <div class="track"><span>Ease out <span class="quiet">arrivals</span></span><div class="rail"><div class="dot" style="transition-timing-function:cubic-bezier(.16,1,.3,1);--d:360ms"></div></div><span class="ms">360 ms</span></div>
+    <div class="track"><span>Ease in-out <span class="quiet">morphs</span></span><div class="rail"><div class="dot" style="transition-timing-function:cubic-bezier(.65,0,.35,1);--d:360ms"></div></div><span class="ms">360 ms</span></div>
+    <div class="track"><span>Spring <span class="quiet">controls</span></span><div class="rail"><div class="dot" style="transition-timing-function:linear(0,.18 5%,.62 12%,.94 20%,1.06 28%,1.07 33%,1.02 45%,.99 60%,1);--d:560ms"></div></div><span class="ms">560 ms</span></div>
+    <div class="track"><span>Seal <span class="quiet">trust moments</span></span><div class="rail"><div class="dot" style="transition-timing-function:cubic-bezier(.16,1,.3,1);--d:520ms"></div></div><span class="ms">520 ms</span></div>
+  </div>
+</div></section>
+
+<section class="type" id="type"><div class="wrap">
+  <header class="sec"><h2>One family, two voices</h2><p>Geist carries everything. Large type goes light and tight; working type stays regular. Geist Mono is reserved for real identifiers such as hashes, ids and timestamps.</p></header>
+  <div class="card"><div class="d">Ask your private knowledge.</div><div class="t1">Compartments and the people who can reach them</div><div class="t2">Evidence and provenance</div><div class="bl">Answers are set at fifteen pixels on a sixty-eight character measure, so a paragraph of cited text stays comfortable to read and every seal sits inside the line.</div><div class="m">evidence_id  ev_7c1a9f3e · sha256 0f3a…b91c · epoch 7 · 14:02:11Z</div></div>
+</div></section>
+</main>
+
+<footer><div class="wrap"><span>Gatelight v1.0, the animated companion to DESIGN.md. All data on this page is simulated.</span><span>Steel and Chalk themes follow your system, or use the switch above.</span></div></footer>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Evidence inspector">
+  <div class="hd"><div><h3>Evidence</h3><span class="quiet" id="dSub"></span></div>
+    <svg class="stamp" viewBox="0 0 38 38" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle class="ring" cx="19" cy="19" r="9.5" transform="rotate(-90 19 19)"/><circle cx="19" cy="19" r="4.5" opacity=".55"/><circle cx="19" cy="19" r="1.4" fill="currentColor" stroke="none"/></svg>
+  </div>
+  <div class="quiet">Excerpt, decrypted for this request</div>
+  <div class="excerpt" id="dEx"></div>
+  <div class="quiet">Authorization proof</div>
+  <div class="kv" id="dKv" style="margin-top:8px"></div>
+  <div class="row" style="margin-top:18px"><button class="btn ghost" id="dClose" type="button"><span data-g="close"></span>Close</button></div>
+</aside>
+<script>
+(() => {
+"use strict";
+const G = {"aperture": "<path d=\"M12 3a9 9 0 1 0 9 9\"/><circle cx=\"12\" cy=\"12\" r=\"4\"/><circle class=\"b\" cx=\"17.2\" cy=\"6.8\" r=\"1.25\"/>", "ask": "<path d=\"M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H11l-4 3.5V16h-.5A2.5 2.5 0 0 1 4 13.5z\"/><path class=\"b\" d=\"M8.5 9.5h6\"/>", "sheet": "<path d=\"M6 4.5A1.5 1.5 0 0 1 7.5 3H14l4.5 4.5v12A1.5 1.5 0 0 1 17 21H7.5A1.5 1.5 0 0 1 6 19.5z\"/><path d=\"M14 3v4.5h4.5\"/><path class=\"b\" d=\"M9.5 13h5M9.5 16.5h3\"/>", "compartment": "<rect x=\"3.5\" y=\"3.5\" width=\"17\" height=\"17\" rx=\"3.5\"/><circle cx=\"12\" cy=\"12\" r=\"3.5\"/><path class=\"b\" d=\"M12 8.5V6.8\"/>", "grant": "<circle cx=\"8\" cy=\"15\" r=\"3.5\"/><path d=\"M10.5 12.5 19 4\"/><path d=\"m16 7 2.5 2.5\"/><circle class=\"b\" cx=\"8\" cy=\"15\" r=\"1\"/>", "mesh": "<circle cx=\"12\" cy=\"5\" r=\"2\"/><circle cx=\"5.5\" cy=\"18\" r=\"2\"/><circle cx=\"18.5\" cy=\"18\" r=\"2\"/><path d=\"M11 6.9 6.5 16M13 6.9l4.5 9.1M7.6 18h8.8\"/><circle class=\"b\" cx=\"12\" cy=\"13.4\" r=\".9\"/>", "ledger": "<rect x=\"3\" y=\"8.5\" width=\"10\" height=\"7\" rx=\"3.5\"/><rect x=\"11\" y=\"8.5\" width=\"10\" height=\"7\" rx=\"3.5\"/><path class=\"b\" d=\"M12 18.5v2\"/>", "strata": "<path d=\"M4.5 7 12 4l7.5 3L12 10z\"/><path d=\"m4.5 11.5 7.5 3 7.5-3\"/><path d=\"m4.5 16 7.5 3 7.5-3\"/><path class=\"b\" d=\"M12 4v6\"/>", "verify": "<path d=\"M12 3 4.5 6v5.5c0 4.5 3 7.8 7.5 9.5 4.5-1.7 7.5-5 7.5-9.5V7.5\"/><path class=\"b\" d=\"m8.8 12 2.4 2.4 5-5.4\"/>", "tune": "<path d=\"M4 7h8.5M17.5 7H20M4 17h2.5M11.5 17H20\"/><circle cx=\"15\" cy=\"7\" r=\"2.5\"/><circle cx=\"9\" cy=\"17\" r=\"2.5\"/><circle class=\"b\" cx=\"15\" cy=\"7\" r=\".8\"/>", "add": "<path d=\"M12 5v5M12 14v5M5 12h5M14 12h5\"/><circle class=\"b\" cx=\"12\" cy=\"12\" r=\"1\"/>", "find": "<path d=\"M16.5 10.5a6 6 0 1 1-6-6\"/><path class=\"b\" d=\"m15 15 5 5\"/>", "session": "<path d=\"M12 3.5a8.5 8.5 0 1 0 8.5 8.5\"/><path d=\"M12 7.5V12l3 2\"/><circle class=\"b\" cx=\"18\" cy=\"6\" r=\"1.25\"/>", "lock": "<rect x=\"5.5\" y=\"10.5\" width=\"13\" height=\"9.5\" rx=\"2.5\"/><path d=\"M8.5 10.5V8a3.5 3.5 0 0 1 6.5-1.8\"/><circle class=\"b\" cx=\"12\" cy=\"15.2\" r=\"1.2\"/>", "iris": "<path d=\"M3 12s3.2-6 9-6 9 6 9 6-3.2 6-9 6-9-6-9-6z\"/><circle class=\"b\" cx=\"12\" cy=\"12\" r=\"2.6\"/>", "wave": "<path d=\"M5 10v4M8.5 7v10M15.5 8v8M19 10.5v3\"/><path class=\"b\" d=\"M12 4.5v15\"/>", "reel": "<rect x=\"3.5\" y=\"5.5\" width=\"17\" height=\"13\" rx=\"2.5\"/><path d=\"M7 5.5v13M17 5.5v13\"/><path class=\"b\" d=\"m10.8 9.6 3.4 2.4-3.4 2.4z\"/>", "brackets": "<path d=\"M8.5 8 4.5 12l4 4M15.5 8l4 4-4 4\"/><path class=\"b\" d=\"m13.2 6.5-2.4 11\"/>", "frame": "<rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"2.5\"/><path d=\"m4 16 4.5-4.5 4 4 2.5-2.5 5 5\"/><circle class=\"b\" cx=\"15.5\" cy=\"9\" r=\"1.3\"/>", "engine": "<path d=\"M12 3 4.2 7.5v9L12 21l7.8-4.5V9\"/><circle class=\"b\" cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M12 10V6.5M13.7 13l3 1.7\"/>", "gate-open": "<path d=\"M12 3.5a8.5 8.5 0 1 0 8.5 8.5\"/><path class=\"b\" d=\"m8.6 12 2.4 2.4 4.8-5\"/>", "gate-closed": "<circle cx=\"12\" cy=\"12\" r=\"8.5\"/><path class=\"b\" d=\"M7 12h10\"/>", "alert": "<path d=\"M10.3 5.2 3.8 17a1.9 1.9 0 0 0 1.7 2.8h13a1.9 1.9 0 0 0 1.7-2.8L13.7 5.2a2 2 0 0 0-3.4 0z\" /><path class=\"b\" d=\"M12 10v3.6\"/><circle class=\"b\" cx=\"12\" cy=\"16.6\" r=\".6\"/>", "hash": "<path d=\"M9.5 4 8 20M16 4l-1.5 16M4.5 9h15M4 15h15\"/><circle class=\"b\" cx=\"19.5\" cy=\"4.5\" r=\"1\"/>", "send": "<path d=\"M12 19V7M6.5 12 12 6.5\"/><path class=\"b\" d=\"m17.5 12-5.5-5.5\"/>", "share": "<circle cx=\"6\" cy=\"12\" r=\"2.5\"/><circle cx=\"18\" cy=\"6\" r=\"2.5\"/><circle cx=\"18\" cy=\"18\" r=\"2.5\"/><path d=\"m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6\"/>", "people": "<circle cx=\"9\" cy=\"8.5\" r=\"3\"/><path d=\"M3.5 19a5.5 5.5 0 0 1 11 0\"/><path class=\"b\" d=\"M16 6a3 3 0 0 1 0 5.6M18 14.2a5.5 5.5 0 0 1 2.5 4.8\"/>", "lan": "<path d=\"M5 10a10 10 0 0 1 14 0M8 13.2a6 6 0 0 1 8 0\"/><circle class=\"b\" cx=\"12\" cy=\"17\" r=\"1.6\"/>", "upload": "<path d=\"M12 16V5M7 9.5 12 5\"/><path d=\"M4.5 16v1.5A2 2 0 0 0 6.5 19.5h11a2 2 0 0 0 2-2V16\"/><circle class=\"b\" cx=\"17\" cy=\"9.5\" r=\"1\"/>", "download": "<path d=\"M12 5v11M7 12l5 4.5\"/><path d=\"M4.5 16v1.5A2 2 0 0 0 6.5 19.5h11a2 2 0 0 0 2-2V16\"/><circle class=\"b\" cx=\"17\" cy=\"12\" r=\"1\"/>", "refresh": "<path d=\"M19 12a7 7 0 1 1-2.1-5\"/><path class=\"b\" d=\"M19 4.5v3.2h-3.2\"/>", "trash": "<path d=\"M5 7h14M9.5 7V5h5v2M7 7l.8 12a1.5 1.5 0 0 0 1.5 1.4h5.4a1.5 1.5 0 0 0 1.5-1.4L17 7\"/><path class=\"b\" d=\"M10.5 11v5M13.5 11v5\"/>", "edit": "<path d=\"M5 19l.7-3.6L16 5.2a1.8 1.8 0 0 1 2.6 0l.2.2a1.8 1.8 0 0 1 0 2.6L8.6 18.3z\"/><path class=\"b\" d=\"m14.5 6.7 2.8 2.8\"/>", "pin": "<path d=\"M9 4h6l-.8 5 2.8 3.5H7L9.8 9z\"/><path class=\"b\" d=\"M12 12.5V20\"/>", "more": "<circle cx=\"12\" cy=\"5.5\" r=\"1.3\"/><circle cx=\"12\" cy=\"12\" r=\"1.3\"/><circle cx=\"12\" cy=\"18.5\" r=\"1.3\"/>", "chevron": "<path d=\"m9 6 6 6-6 6\"/>", "close": "<path d=\"M6.5 6.5 17.5 17.5M17.5 6.5l-11 11\"/>", "copy": "<rect x=\"8.5\" y=\"8.5\" width=\"11\" height=\"11\" rx=\"2.5\"/><path d=\"M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2\"/>", "check": "<path d=\"m5.5 12.5 4.2 4.2L18.5 7.5\"/>", "panel": "<rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3\"/><path d=\"M9.5 4.5v15\"/><path class=\"b\" d=\"M6.3 9h.01M6.3 12h.01\"/>", "terminal": "<rect x=\"3.5\" y=\"4.5\" width=\"17\" height=\"15\" rx=\"3\"/><path d=\"m7.5 10 2.8 2-2.8 2\"/><path class=\"b\" d=\"M12.5 15h4\"/>", "pulse": "<path d=\"M3.5 12h4l2-5 3.6 10 2.4-5h5\"/><circle class=\"b\" cx=\"20.5\" cy=\"12\" r=\".4\"/>", "drive": "<rect x=\"3.5\" y=\"8\" width=\"17\" height=\"8.5\" rx=\"2.5\"/><path d=\"M7 12.3h.01\"/><path class=\"b\" d=\"M16.5 12.3h.01\"/>"};
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const root = document.documentElement;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+root.dataset.motion = reduced ? "off" : "on";
+const motionOn = () => root.dataset.motion !== "off";
+const sleep = ms => new Promise(r => setTimeout(r, motionOn() ? ms : Math.min(ms, 20)));
+
+/* ───── glyph renderer ───── */
+const glyph = (name, extra = "") => `<svg class="glyph glyph-${name} ${extra}" viewBox="0 0 24 24" aria-hidden="true">${G[name] || ""}</svg>`;
+function hydrate(scope = document) {
+  $$("[data-g]", scope).forEach(el => {
+    const t = document.createElement("template");
+    t.innerHTML = glyph(el.dataset.g, el.dataset.class || "");
+    el.replaceWith(t.content.firstChild);
+  });
+}
+
+/* ───── deterministic hash helpers ───── */
+function fnv(str, seed = 2166136261) { let h = seed >>> 0; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
+const hex12 = s => (fnv(s).toString(16).padStart(8, "0") + (fnv(s, 99991) & 0xffff).toString(16).padStart(4, "0")).slice(0, 12);
+function identicon(hash) {
+  let seed = parseInt(hash.slice(0, 8), 16) || 1, bits = [];
+  const next = () => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed; };
+  for (let r = 0; r < 5; r++) { const row = [0, 1, 2].map(() => next() & 1); bits.push([row[0], row[1], row[2], row[1], row[0]]); }
+  return `<span class="identicon" aria-hidden="true">${bits.flat().map(b => `<i class="${b ? "on" : ""}"></i>`).join("")}</span>`;
+}
+
+/* ───── chrome: theme, motion, header ───── */
+const dark = () => root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+function syncTheme() { $("#themeLbl").textContent = dark() ? "Steel" : "Chalk"; paintSwatches(); }
+$("#themeBtn").onclick = () => { root.dataset.theme = dark() ? "light" : "dark"; syncTheme(); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", syncTheme);
+function syncMotion() {
+  const on = motionOn();
+  $("#motionBtn").setAttribute("aria-pressed", String(on));
+  $("#motionLbl").textContent = on ? "Motion on" : "Motion off";
+  const svg = $("#fedSvg"); if (svg && svg.pauseAnimations) on ? svg.unpauseAnimations() : svg.pauseAnimations();
+}
+$("#motionBtn").onclick = () => { root.dataset.motion = motionOn() ? "off" : "on"; syncMotion(); };
+$("#brandBtn").onclick = () => scrollTo({ top: 0, behavior: motionOn() ? "smooth" : "auto" });
+addEventListener("scroll", () => $("#top").classList.toggle("scrolled", scrollY > 8), { passive: true });
+
+/* ───── strata ───── */
+function strata(level, ceiling, big) {
+  const bars = [1, 2, 3, 4].map(i => `<b class="${i <= level ? "on" : ceiling && i <= ceiling ? "gap" : ""}"></b>`).join("");
+  const label = `Clearance level ${level} of 4${ceiling ? `, compartment ceiling ${ceiling}` : ""}`;
+  return `<span class="strata ${big ? "lg" : ""}" role="img" aria-label="${label}"><i>${bars}</i>L${level}</span>`;
+}
+
+/* ───── hero: gate path ───── */
+const PERSONAS = [
+  { id: "alice", name: "Alice", role: "Finance lead", level: 2 },
+  { id: "charlie", name: "Charlie", role: "Engineer", level: 1 },
+  { id: "eve", name: "Eve", role: "External contractor", level: 0 },
+];
+const QUESTIONS = [
+  { id: "budget", text: "What is the approved budget for Q3?", need: 2 },
+  { id: "salary", text: "What is the lead engineer salary?", need: 3 },
+];
+const CEILING = 3;
+let sel = { p: PERSONAS[0], q: QUESTIONS[0] };
+const STEPS = ["Identity", "Scope", "Gate A", "Candidates", "Gate B", "Evidence", "Grounding", "Answer"];
+
+function buildAsk() {
+  $("#personas").innerHTML = PERSONAS.map(p => `<button type="button" role="radio" aria-checked="${p === sel.p}" data-p="${p.id}"><span class="avatar">${p.name[0]}</span><span class="meta"><b style="font-weight:600">${p.name}</b><small>${p.role}</small></span>${strata(p.level)}</button>`).join("");
+  $("#questions").innerHTML = QUESTIONS.map(q => `<button type="button" role="radio" aria-checked="${q === sel.q}" data-q="${q.id}">${q.text}</button>`).join("");
+}
+$("#personas").onclick = e => { const b = e.target.closest("[data-p]"); if (!b) return; sel.p = PERSONAS.find(p => p.id === b.dataset.p); buildAsk(); run(); };
+$("#questions").onclick = e => { const b = e.target.closest("[data-q]"); if (!b) return; sel.q = QUESTIONS.find(q => q.id === b.dataset.q); buildAsk(); run(); };
+
+function resetPath() {
+  $("#path").innerHTML = STEPS.map((s, i) => `<li class="${i === 2 || i === 4 ? "gate" : ""}" data-i="${i}"><span class="n"></span><span class="t">${s}</span><span class="v">&nbsp;</span></li>`).join("");
+  ["fA", "fB"].forEach(id => $("#" + id).style.width = "0");
+  $("#lA").textContent = $("#lB").textContent = $("#lX").textContent = "0";
+}
+const node = i => $(`#path li[data-i="${i}"]`);
+const setNode = (i, cls, v) => { const n = node(i); n.classList.remove("active", "done", "blocked", "skipped"); if (cls) n.classList.add(cls); if (v !== undefined) $(".v", n).textContent = v; };
+
+function outcome() {
+  const { p, q } = sel;
+  if (p.level === 0) return { stop: "scope", reason: "UNAUTHORIZED_SCOPE", why: "Your role has no access to this compartment, so the question never reached retrieval." };
+  if (p.level < q.need) return { stop: "gateA", reason: p.level >= 2 ? "CLASSIFICATION_EXCEEDS_CLEARANCE" : "UNAUTHORIZED_SCOPE", why: p.level >= 2 ? "This record is classified above your clearance. Nothing restricted reached the model." : "The compartment holds finance records outside your role. Gate A removed them before the vector search ran." };
+  return { stop: null, A: 24, B: 5 };
+}
+let runId = 0;
+async function run() {
+  const id = ++runId; const o = outcome(); const out = $("#out");
+  closeDrawer(); resetPath();
+  out.className = "out idle"; out.innerHTML = `<div><span class="glyph-wrap" data-g="aperture" data-class="big is-busy"></span><p style="margin:10px 0 0">Passing the gates…</p></div>`; hydrate(out);
+  const alive = () => id === runId;
+  const step = async (i, v, ms = 340) => { setNode(i, "active"); await sleep(ms); if (!alive()) return false; setNode(i, "done", v); return true; };
+  if (!(await step(0, sel.p.id.toLowerCase()))) return;
+  if (o.stop === "scope") { setNode(1, "active"); await sleep(340); if (!alive()) return; setNode(1, "blocked", "denied"); for (let i = 2; i < 8; i++) setNode(i, "skipped"); return refusal(o); }
+  if (!(await step(1, "finance-q3"))) return;
+  if (!(await step(2, "signed", 420))) return;
+  if (o.stop === "gateA") {
+    setNode(3, "active"); await sleep(380); if (!alive()) return;
+    setNode(3, "blocked", "0"); for (let i = 4; i < 8; i++) setNode(i, "skipped"); return refusal(o);
+  }
+  setNode(3, "active"); await sleep(380); if (!alive()) return;
+  setNode(3, "done", String(o.A)); $("#fA").style.width = "100%"; $("#lA").textContent = o.A;
+  if (!(await step(4, "recheck", 460))) return;
+  $("#fB").style.width = (o.B / o.A * 100) + "%"; $("#lB").textContent = o.B; $("#lX").textContent = o.A - o.B;
+  if (!(await step(5, o.B + " sealed"))) return;
+  if (!(await step(6, "2 claims"))) return;
+  if (!(await step(7, "2 seals"))) return;
+  answer(o);
+}
+
+function refusal(o) {
+  const miss = Math.max(0, CEILING - sel.p.level);
+  const out = $("#out"); out.className = "out";
+  out.innerHTML = `<div class="refusal draw"><div class="tileb">${glyph("gate-closed")}</div><div>
+    <h3>Outside your clearance</h3><p>${o.why}</p>
+    <div style="margin-top:14px">${strata(sel.p.level, CEILING, true)}</div>
+    <div class="gapnote">${miss ? `The hatched ${miss === 1 ? "layer is" : "layers are"} what a temporary grant would unlock.` : "Your clearance covers the compartment, but not this record."}</div>
+    <div class="actions"><button class="btn hold-btn" id="reqBtn" type="button">${glyph("session")}Request temporary access</button><span class="mono quiet">Reason ${o.reason}</span></div>
+    <p class="sim" id="reqNote" style="margin-top:10px"></p></div></div>`;
+  $("#reqBtn").onclick = () => $("#reqNote").textContent = "In the product this opens the existing request-access dialog. Nothing changes in the permission logic.";
+}
+
+const EV = {
+  1: { title: "Budget memo", loc: "page 4", quote: "approved budget for the quarter is $1.42M", rel: 94, full: ["Finance Q3 budget memo. Total ", "approved budget for the quarter is $1.42M", ", allocated 62% to engineering and 38% to operations. Approved by the CFO on 12 September."] },
+  2: { title: "Spend policy", loc: "page 7", quote: "discretionary spend is capped at 92%", rel: 81, full: ["Policy note. Until the October review, ", "discretionary spend is capped at 92%", " of each team's allocation."] },
+};
+function answer(o) {
+  const out = $("#out"); out.className = "out";
+  out.innerHTML = `<div class="answer-head">${glyph("verify")}<strong>Verified, grounded</strong><span class="quiet">Every claim below links to an exact quote</span></div>
+  <p class="answer"><span class="claim" data-c="1">The approved budget for Q3 is $1.42M, split between engineering and operations.</span><button class="seal" type="button" data-c="1" aria-label="Open evidence C1">C1</button> <span class="claim" data-c="2">Discretionary spend is capped at 92% until the October review.</span><button class="seal" type="button" data-c="2" aria-label="Open evidence C2">C2</button></p>
+  <div class="tiles">${[1, 2].map(c => `<button class="tile hov sealed" type="button" data-c="${c}" style="--m:oklch(0.62 0.04 240)"><span class="mt">${glyph("sheet")}</span><span style="flex:1"><h4>${EV[c].title}<span class="strata" style="height:18px;font-size:10.5px">${EV[c].loc}</span></h4><q>“${EV[c].quote}”</q><div class="rel"><i style="width:${EV[c].rel}%"></i></div></span></button>`).join("")}</div>
+  <div class="gatesum"><span>Gate A <b>${o.A}</b> candidates, Gate B <b>${o.B}</b> authorized</span><span class="depth" title="Retrieval depth: low"><i class="on"></i><i></i><i></i></span><span class="chip trust">${glyph("lock")}Closed world, sealed</span></div>`;
+  const lit = (c, on) => $$(`[data-c="${c}"]`, out).forEach(el => el.classList.toggle("lit", on));
+  out.onmouseover = e => { const t = e.target.closest("[data-c]"); if (t) lit(t.dataset.c, true); };
+  out.onmouseout = e => { const t = e.target.closest("[data-c]"); if (t) lit(t.dataset.c, false); };
+  out.onfocusin = out.onmouseover; out.onfocusout = out.onmouseout;
+  out.onclick = e => { const t = e.target.closest("button[data-c]"); if (t) openDrawer(t.dataset.c, t); };
+}
+
+/* ───── evidence drawer ───── */
+let lastTrigger = null;
+function openDrawer(c, trigger) {
+  const ev = EV[c]; lastTrigger = trigger;
+  const hash = hex12("ev" + c + "sha").repeat(2).slice(0, 20);
+  $("#dSub").textContent = `Citation C${c}, ${ev.title}, ${ev.loc}`;
+  $("#dEx").innerHTML = `${ev.full[0]}<mark>${ev.full[1]}</mark>${ev.full[2]}`;
+  $("#dKv").innerHTML = `<div><span>Decision</span><span class="chip permit">${glyph("gate-open")}Permitted</span></div>
+   <div><span>Evidence id</span><span class="mono">ev_${hex12("id" + c).slice(0, 8)}</span></div>
+   <div><span>Principal</span><span class="mono">${sel.p.id}</span></div>
+   <div><span>Policy and epoch</span><span class="mono">v3 / epoch 7</span></div>
+   <div><span>Clock</span><span class="mono" style="color:var(--permit)">OK</span></div>
+   <div><span>Content SHA-256</span><span class="mono" style="display:inline-flex;gap:8px;align-items:center">${hash.slice(0, 8)}…${hash.slice(-4)} ${identicon(hash)}</span></div>`;
+  $("#scrim").classList.add("on"); $("#drawer").classList.add("on"); $("#drawer").setAttribute("aria-hidden", "false");
+  setTimeout(() => $("#dClose").focus(), 60);
+}
+function closeDrawer() {
+  if (!$("#drawer").classList.contains("on")) return;
+  $("#scrim").classList.remove("on"); $("#drawer").classList.remove("on"); $("#drawer").setAttribute("aria-hidden", "true");
+  lastTrigger && lastTrigger.focus && lastTrigger.focus();
+}
+$("#scrim").onclick = closeDrawer; $("#dClose").onclick = closeDrawer;
+addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+$("#runBtn").onclick = run;
+
+/* ───── palette ───── */
+const TOKENS = [["Canvas", "--bg", "--background"], ["Surface", "--surface", "--surface"], ["Raised", "--raised", "--card"], ["Hairline", "--line", "--border"], ["Ink", "--ink", "--foreground"], ["Ink-2", "--ink2", "--muted-foreground"], ["Permit, Verdigris", "--permit", "--sec-allowed"], ["Deny, Garnet", "--deny", "--sec-denied"], ["Hold, Saffron", "--hold", "--sec-warning"], ["Trust, Lapis", "--trust", "--sec-trust"], ["Beam", "--beam", "--beam"]];
+function paintSwatches() {
+  const cs = getComputedStyle(root);
+  $("#swatches").innerHTML = TOKENS.map(([n, v, real]) => {
+    const val = cs.getPropertyValue(v).trim();
+    const light = ["--ink", "--ink2", "--permit", "--hold", "--beam", "--trust", "--deny"].includes(v);
+    const txt = ["--bg", "--surface", "--raised", "--line"].includes(v) ? "var(--ink)" : (dark() ? "oklch(0.18 0.01 250)" : "oklch(0.98 0.003 250)");
+    return `<div style="background:var(${v});color:${txt}"><b>${n}</b><small>${real}</small><small>${val}</small></div>`;
+  }).join("");
+}
+
+/* ───── glyph gallery ───── */
+const names = Object.keys(G);
+$("#ggrid").innerHTML = names.map(n => `<button class="gcell" type="button" data-n="${n}" aria-label="Copy ${n} glyph">${glyph(n)}<span>${n}</span></button>`).join("");
+$("#ggrid").onclick = async e => {
+  const b = e.target.closest(".gcell"); if (!b) return; const n = b.dataset.n;
+  const svg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${G[n]}</svg>`;
+  const lab = $("span", b), old = lab.textContent;
+  try { await navigator.clipboard.writeText(svg); lab.textContent = "copied"; } catch { lab.textContent = "see console"; console.log(svg); }
+  b.classList.add("copied"); setTimeout(() => { lab.textContent = old; b.classList.remove("copied"); }, 1100);
+};
+$("#gSize").oninput = e => { $("#ggrid").style.setProperty("--gz", e.target.value + "px"); $("#gSizeO").textContent = e.target.value; };
+$("#gStroke").oninput = e => { $("#ggrid").style.setProperty("--gs", e.target.value); $("#gStrokeO").textContent = (+e.target.value).toFixed(2).replace(/0$/, ""); };
+const ACC = [["Beam", "var(--beam)"], ["Permit", "var(--permit)"], ["Deny", "var(--deny)"], ["Hold", "var(--hold)"], ["Trust", "var(--trust)"]];
+$("#accPick").innerHTML = ACC.map(([n, c], i) => `<button type="button" style="--c:${c}" aria-label="${n} accent" aria-pressed="${i === 0}" data-c="${c}"></button>`).join("");
+$("#accPick").onclick = e => { const b = e.target.closest("button"); if (!b) return; $$("#accPick button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); $("#ggrid").style.setProperty("--glyph-accent", b.dataset.c); $$("#ggrid .gcell .glyph").forEach(g => g.style.setProperty("--glyph-accent", b.dataset.c)); };
+$("#busyBtn").onclick = e => { const on = e.currentTarget.getAttribute("aria-pressed") !== "true"; e.currentTarget.setAttribute("aria-pressed", String(on)); $$("#ggrid .glyph").forEach(g => g.classList.toggle("is-busy", on)); };
+
+/* ───── strata builder ───── */
+function paintStrata() {
+  const l = +$("#sLvl").value; let c = +$("#sCap").value;
+  $("#sLvlO").textContent = "L" + l; $("#sCapO").textContent = "L" + c;
+  $("#sBig").innerHTML = strata(l, c, true);
+  $("#sSmall").innerHTML = `${strata(l)}${strata(l, c)}`;
+  const gap = Math.max(0, c - l);
+  $("#sNote").textContent = gap ? `Missing ${gap} ${gap === 1 ? "layer" : "layers"}, L${l + 1}${gap > 1 ? " to L" + c : ""}. A just-in-time request would unlock exactly that range.` : "Full reach. This clearance covers the whole compartment.";
+}
+["sLvl", "sCap"].forEach(id => $("#" + id).oninput = paintStrata);
+
+/* ───── depth dial ───── */
+const DEPTH = [
+  { k: "Low", n: 1, d: "Standard vector search over the persistent index. Fast and light.", m: [90, 55, 25] },
+  { k: "Medium", n: 2, d: "Lazy, query-aware chunking with a content-hash cache. More precise.", m: [65, 75, 55] },
+  { k: "High", n: 3, d: "Intent analysis, hybrid search, context expansion and local reranking.", m: [50, 95, 85] },
+];
+let dsel = 0;
+$("#depth").insertAdjacentHTML("beforeend", DEPTH.map((x, i) => `<button type="button" role="radio" aria-checked="${i === 0}" data-i="${i}"><span class="depth">${[0, 1, 2].map(j => `<i class="${j < x.n ? "on" : ""}"></i>`).join("")}</span>${x.k}</button>`).join(""));
+function paintDepth() {
+  const btns = $$("#depth button"), b = btns[dsel], th = $("#depth .thumb");
+  btns.forEach((x, i) => x.setAttribute("aria-checked", String(i === dsel)));
+  th.style.width = b.offsetWidth + "px"; th.style.transform = `translateX(${b.offsetLeft - 3}px)`;
+  const d = DEPTH[dsel]; const desc = $("#depthDesc"); desc.style.opacity = 0;
+  setTimeout(() => { desc.textContent = d.d; desc.style.opacity = 1; }, motionOn() ? 120 : 0);
+  $("#depthMeters").innerHTML = ["Speed", "Precision", "Compute"].map((n, i) => `<div><span>${n}</span><span class="m"><i style="width:${d.m[i]}%"></i></span></div>`).join("");
+}
+$("#depth").onclick = e => { const b = e.target.closest("button"); if (!b) return; dsel = +b.dataset.i; paintDepth(); };
+
+/* ───── session ring ───── */
+let rem = 300; const C = 2 * Math.PI * 11;
+const mmss = s => String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+function paintRing() {
+  const r = $("#sring"); $(".arc", r).style.strokeDashoffset = String(C * (1 - rem / 300));
+  $("#stm").textContent = mmss(rem);
+  const st = rem <= 0 ? "out" : rem <= 30 ? "warn" : rem <= 60 ? "low" : "ok"; r.dataset.s = st;
+  r.setAttribute("aria-label", `Session time remaining ${mmss(rem)}. Click to renew.`);
+  $("#sstate").textContent = { ok: "Active. The ring drains with inactivity and refills on any real input.", low: "Under a minute. The arc turns Saffron.", warn: "Final thirty seconds. The ring breathes and the warning card appears.", out: "Signed out. The session has expired and keys are revoked." }[st];
+}
+setInterval(() => { if (rem > 0) { rem--; paintRing(); } }, 1000);
+$("#ff").onclick = () => { rem = Math.max(0, rem - 30); paintRing(); };
+const renew = () => { const r = $("#sring"); r.classList.add("renew"); rem = 300; paintRing(); setTimeout(() => r.classList.remove("renew"), 500); };
+$("#rn").onclick = renew; $("#sring").onclick = renew;
+
+/* ───── audit chain ───── */
+const ACTIONS = ["login.ok alice", "query.allow alice finance-q3", "query.deny charlie finance-q3", "grant.issue alice to charlie, 10 min", "access.request eve company-public", "grant.revoke diana charlie", "vault.epoch finance-q3 to 7", "checkpoint.sign diana"];
+let blocks = [], tampered = false;
+function buildChain() {
+  let prev = "0".repeat(12); blocks = [];
+  ACTIONS.forEach((a, i) => { const cur = hex12(prev + a); blocks.push({ a, prev, cur, t: `14:0${i}:${10 + i * 7}` }); prev = cur; });
+  tampered = false; $("#tBtn").setAttribute("aria-pressed", "false"); paintChain();
+}
+function paintChain() {
+  const rows = blocks.map((b, i) => {
+    const show = (tampered && i === 4) ? "query.allow eve company-public" : b.a;
+    return `<div class="blk" data-i="${i}"><span class="lk">${glyph("ledger")}</span><span class="act">${show}</span><span class="hs"><span>${b.prev.slice(0, 6)}</span><em>to</em><span>${b.cur.slice(0, 6)}</span>${identicon(b.cur)}</span><span class="mono quiet">${b.t}</span></div>`;
+  }).join("");
+  $("#chain").innerHTML = `<div class="sweep" id="sweep"></div>${rows}`;
+  $("#verdict").innerHTML = `<span class="quiet">Not verified yet.</span>`;
+}
+$("#tBtn").onclick = e => { tampered = !tampered; e.currentTarget.setAttribute("aria-pressed", String(tampered)); paintChain(); };
+let verifying = false;
+$("#vBtn").onclick = async () => {
+  if (verifying) return; verifying = true; paintChain();
+  const sw = $("#sweep"); sw.classList.add("go"); sw.style.setProperty("--sd", motionOn() ? ".22s" : ".01s");
+  let broken = -1;
+  for (let i = 0; i < blocks.length; i++) {
+    const row = $(`.blk[data-i="${i}"]`);
+    sw.style.setProperty("--sy", (row.offsetTop + row.offsetHeight - 1) + "px");
+    await sleep(240);
+    const shown = (tampered && i === 4) ? "query.allow eve company-public" : blocks[i].a;
+    const okHash = hex12(blocks[i].prev + shown) === blocks[i].cur;
+    const okLink = i === 0 || blocks[i].prev === blocks[i - 1].cur;
+    if (okHash && okLink) row.classList.add("ok"); else { row.classList.add("bad"); broken = i; break; }
+  }
+  sw.classList.remove("go"); sw.style.opacity = 0;
+  $("#verdict").innerHTML = broken < 0
+    ? `<span class="chip trust">${glyph("verify")}Chain intact</span><span class="quiet">${blocks.length} blocks, every link sealed</span>`
+    : `<span class="chip deny">${glyph("gate-closed")}Chain broken at block ${broken + 1}</span><span class="quiet">The stored hash no longer matches the event. Blocks after it cannot be trusted.</span>`;
+  verifying = false;
+};
+
+/* ───── test matrix ───── */
+const CATS = [["Authentication", 10, "AUTH"], ["Dataset scope", 7, "SCOPE"], ["Retrieval firewall", 12, "RET"], ["Structured data", 8, "DB"], ["Grants", 14, "GRANT"], ["Citations", 10, "CIT"], ["Injection and DLP", 8, "INJ"], ["Storage", 6, "STORE"], ["Federation", 6, "LAN"], ["Audit", 3, "AUDIT"]];
+$("#mx").innerHTML = CATS.map(([n, c, id]) => `<div class="g"><span class="quiet">${n}, ${c}</span><div class="cells" style="--cols:${Math.min(c, 7)}">${Array.from({ length: c }, (_, i) => `<i data-t="${id}-${String(i + 1).padStart(3, "0")}" data-c="${n}"></i>`).join("")}</div></div>`).join("");
+$("#mx").onmouseover = e => { const i = e.target.closest("i[data-t]"); if (i) $("#mxTip").textContent = `${i.dataset.t}, ${i.dataset.c}${i.classList.contains("fail") ? ", failed" : i.classList.contains("pass") ? ", passed" : ""}`; };
+let mxBusy = false;
+$("#mxFail").onclick = e => e.currentTarget.setAttribute("aria-pressed", String(e.currentTarget.getAttribute("aria-pressed") !== "true"));
+$("#mxRun").onclick = async () => {
+  if (mxBusy) return; mxBusy = true;
+  const cells = $$("#mx i"); cells.forEach(c => c.className = "");
+  const failOn = $("#mxFail").getAttribute("aria-pressed") === "true" ? "GRANT-007" : null;
+  let pass = 0; const cnt = $("#mxc"); cnt.style.color = "";
+  for (const c of cells) {
+    if (c.dataset.t === failOn) c.classList.add("fail"); else { c.classList.add("pass"); pass++; }
+    cnt.innerHTML = `${pass}<small> / 84</small>`;
+    await sleep(15);
+  }
+  if (failOn) { cnt.style.color = "var(--deny)"; $("#mxTip").textContent = `${failOn} failed. ${pass} of 84 passed.`; } else $("#mxTip").textContent = "All 84 invariants passed.";
+  mxBusy = false;
+};
+
+/* ───── federation ───── */
+const PEERS = [
+  { n: "Finance workstation", a: "192.168.1.14", s: "trusted", seen: "12 seconds ago" },
+  { n: "HR desk", a: "192.168.1.21", s: "trusted", seen: "40 seconds ago" },
+  { n: "Engineering lab", a: "192.168.1.33", s: "trusted", seen: "6 seconds ago" },
+  { n: "Audit station", a: "192.168.1.8", s: "trusted", seen: "2 minutes ago" },
+  { n: "Contractor laptop", a: "192.168.1.47", s: "offline", seen: "2 days ago" },
+];
+(function buildMesh() {
+  const cx = 260, cy = 200, R = 142; let s = "";
+  const pos = PEERS.map((p, i) => { const a = (-90 + i * 72) * Math.PI / 180; return [cx + R * Math.cos(a), cy + R * Math.sin(a)]; });
+  PEERS.forEach((p, i) => {
+    const [x, y] = pos[i];
+    s += `<line class="l ${p.s === "offline" ? "off" : ""}" x1="${cx}" y1="${cy}" x2="${x}" y2="${y}"/>`;
+    if (p.s !== "offline") s += `<circle r="3.2" fill="var(--beam)"><animateMotion dur="${2.2 + i * .35}s" begin="${i * .4}s" repeatCount="indefinite" path="M${cx},${cy} L${x},${y}"/></circle>`;
+  });
+  PEERS.forEach((p, i) => {
+    const [x, y] = pos[i];
+    s += `<g class="node" tabindex="0" role="button" aria-label="${p.n}, ${p.s}" data-i="${i}" style="cursor:pointer;outline:none"><circle class="c" cx="${x}" cy="${y}" r="26" style="${p.s === "offline" ? "stroke-dasharray:3 4" : ""}"/><svg x="${x - 11}" y="${y - 11}" width="22" height="22" viewBox="0 0 24 24" class="glyph" style="color:${p.s === "offline" ? "var(--ink3)" : "var(--ink)"};--glyph-accent:${p.s === "offline" ? "var(--ink3)" : "var(--beam)"}">${G.drive}</svg><text x="${x}" y="${y + 44}">${p.n}</text></g>`;
+  });
+  s += `<g><circle cx="${cx}" cy="${cy}" r="34" fill="var(--raised)" stroke="var(--trust)" stroke-width="1.5"/><svg x="${cx - 14}" y="${cy - 14}" width="28" height="28" viewBox="0 0 24 24" class="glyph" style="color:var(--ink);--glyph-accent:var(--beam)">${G.aperture}</svg><text x="${cx}" y="${cy + 54}" style="font:600 12px var(--font);fill:var(--ink);text-anchor:middle">This node</text></g>`;
+  $("#fedSvg").innerHTML = s;
+  const show = i => {
+    const p = PEERS[i], on = p.s !== "offline";
+    $$("#fedSvg .node").forEach(n => n.classList.toggle("sel", +n.dataset.i === i));
+    $("#nodeInfo").innerHTML = `<h3>${p.n}</h3><span class="chip ${on ? "permit" : "mute"}">${glyph(on ? "gate-open" : "gate-closed")}${on ? "Trusted" : "Offline"}</span><dl><dt>Address</dt><dd>${p.a}</dd><dt>Last seen</dt><dd>${p.seen}</dd><dt>Bundles</dt><dd>${on ? "signed, recipient-bound" : "none accepted"}</dd><dt>Replay guard</dt><dd>${on ? "nonce store active" : "not applicable"}</dd></dl>`;
+  };
+  $("#fedSvg").addEventListener("click", e => { const n = e.target.closest(".node"); if (n) show(+n.dataset.i); });
+  $("#fedSvg").addEventListener("keydown", e => { const n = e.target.closest(".node"); if (n && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); show(+n.dataset.i); } });
+  show(0);
+})();
+
+/* ───── motion lab ───── */
+$("#playM").onclick = () => { $$("#lab .rail").forEach(r => r.style.setProperty("--w", r.clientWidth + "px")); $("#lab").classList.add("go"); };
+$("#resetM").onclick = () => $("#lab").classList.remove("go");
+
+/* ───── boot ───── */
+hydrate(); buildAsk(); resetPath(); syncTheme(); syncMotion(); paintStrata(); paintDepth(); paintRing(); buildChain();
+addEventListener("resize", paintDepth);
+document.fonts && document.fonts.ready.then(paintDepth);
+setTimeout(run, 700);
+})();
+
+</script>
+</body>
+</html>

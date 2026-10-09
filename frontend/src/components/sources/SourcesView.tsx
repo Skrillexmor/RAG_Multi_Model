@@ -43,6 +43,10 @@ import {
   DialogFooter,
 } from "../ui/dialog"
 import { ShareAccessModal } from "../common/ShareAccessModal"
+import { Strata } from "../ui/strata"
+import { Seal } from "../ui/seal"
+import { cn } from "../../lib/utils"
+import { Sheet, Iris, Wave, Reel, Brackets } from "../../glyphs"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +62,7 @@ export const SourcesView: React.FC = () => {
   const { vaults, setSelectedVault, startNewChat, refreshVaults } = useApp()
   const [search, setSearch] = useState("")
   const [selectedUploadVault, setSelectedUploadVault] = useState<string | null>(null)
+  const [modalityFilter, setModalityFilter] = useState<"ALL" | "DOC" | "IMAGE" | "AUDIO" | "VIDEO" | "CODE">("ALL")
   const [expandedVaults, setExpandedVaults] = useState<Record<string, boolean>>({})
 
   // CRUD Modals state
@@ -250,12 +255,12 @@ export const SourcesView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-5">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-              <FolderLock className="h-4.5 w-4.5" />
+            <div className="h-9 w-9 rounded-xl bg-secondary border border-border flex items-center justify-center text-foreground shadow-sm">
+              <FolderLock className="h-4.5 w-4.5 text-trust" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-foreground tracking-tight">
-                Knowledge Folders & Sources
+              <h2 className="text-xl font-light text-foreground tracking-tight">
+                Sources
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Manage folder structure, upload documents, assign access, and query with verified zero-trust proofs.
@@ -268,9 +273,9 @@ export const SourcesView: React.FC = () => {
           <Button
             size="sm"
             onClick={() => setIsCreateModalOpen(true)}
-            className="gap-1.5 text-xs h-8.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-sm transition-all"
+            className="gap-1.5 text-xs h-8 bg-foreground text-background hover:bg-foreground/90 font-medium shadow-sm transition-all"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             <span>Create Folder</span>
           </Button>
 
@@ -278,34 +283,67 @@ export const SourcesView: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => setSelectedUploadVault(vaults[0]?.slug || "project-alpha")}
-            className="gap-1.5 text-xs h-8.5 border-border hover:bg-secondary font-medium"
+            className="gap-1.5 text-xs h-8 border-border hover:bg-secondary font-medium"
           >
-            <Upload className="h-3.5 w-3.5 text-emerald-400" />
+            <Upload className="h-3.5 w-3.5 text-trust" />
             <span>Upload Document</span>
           </Button>
         </div>
       </div>
 
-      {/* Filter / Search Bar & Stats */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* Filter / Search Bar, Modality Filter & Stats */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search folders, documents, or tags..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 text-xs h-8.5 bg-surface-raised border-border"
+            className="pl-9 text-xs h-8 bg-surface border-border"
           />
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-          <span className="px-2.5 py-1 rounded-md bg-surface-subtle border border-border">
-            {vaults.length} {vaults.length === 1 ? "Folder" : "Folders"}
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-surface-subtle border border-border">
-            {vaults.reduce((acc, v) => acc + (v.documents?.length || v.document_count || 0), 0)}{" "}
-            Total Docs
-          </span>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Modality Filter Chips */}
+          <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 bg-surface text-[11px] font-mono">
+            {(
+              [
+                ["ALL", "All"],
+                ["DOC", "Doc"],
+                ["IMAGE", "Image"],
+                ["AUDIO", "Audio"],
+                ["VIDEO", "Video"],
+                ["CODE", "Code"],
+              ] as const
+            ).map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setModalityFilter(val)}
+                className={cn(
+                  "px-2 py-0.5 rounded transition-colors",
+                  modalityFilter === val
+                    ? "bg-foreground text-background font-medium"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+            <span className="px-2.5 py-1 rounded-md bg-surface border border-border">
+              {vaults.length} {vaults.length === 1 ? "Folder" : "Folders"}
+            </span>
+            <span className="px-2.5 py-1 rounded-md bg-surface border border-border">
+              {vaults.reduce(
+                (acc, v) => acc + (v.documents?.length || v.document_count || 0),
+                0
+              )}{" "}
+              Docs
+            </span>
+          </div>
         </div>
       </div>
 
@@ -336,89 +374,77 @@ export const SourcesView: React.FC = () => {
             return (
               <div
                 key={vault.vault_id}
-                className="group rounded-2xl border border-border/80 bg-surface-raised hover:border-emerald-500/40 transition-all duration-200 shadow-sm overflow-hidden"
+                className="group rounded-2xl border border-border bg-surface hover:border-border/80 transition-all duration-200 shadow-sm overflow-hidden"
               >
-                {/* Vault Header Bar */}
-                <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-surface-raised to-surface-raised/70">
+                {/* Vault Header Bar: Safe-door Tile */}
+                <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40">
                   <div className="flex items-center gap-3.5 min-w-0">
                     <button
                       type="button"
                       onClick={() => toggleExpand(vault.vault_id)}
-                      className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0 hover:bg-emerald-500/20 transition-all text-emerald-400"
+                      className="h-11 w-11 rounded-xl bg-secondary border border-border flex items-center justify-center shrink-0 hover:bg-secondary/80 transition-all text-trust shadow-sm"
                     >
                       <FolderLock className="h-5 w-5" />
                     </button>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-bold text-foreground tracking-tight truncate">
+                        <h3 className="text-sm font-medium text-foreground tracking-tight truncate">
                           {vault.display_name}
                         </h3>
-                        <Badge variant="clearance" className="text-[10px] py-0 px-1.5 font-mono">
-                          Ceiling L{vault.classification_ceiling}
-                        </Badge>
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] py-0 px-1.5 font-mono text-muted-foreground"
-                        >
+                        <Strata level={vault.classification_ceiling} size="sm" />
+                        <span className="text-[10px] py-0 px-1.5 font-mono text-muted-foreground bg-secondary rounded border border-border">
                           {vault.slug}
-                        </Badge>
+                        </span>
                       </div>
 
-                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground mt-1">
-                        <span className="flex items-center gap-1">
-                          <FileText className="h-3 w-3" />
-                          {docCount} {docCount === 1 ? "File" : "Files"}
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground font-mono mt-1">
+                        <span>
+                          {docCount} {docCount === 1 ? "file" : "files"} · {chunkCount} chunks
                         </span>
                         <span>•</span>
-                        <span className="flex items-center gap-1">
-                          <Layers className="h-3 w-3" />
-                          {chunkCount} Chunks
-                        </span>
-                        <span>•</span>
-                        <span className="text-[10px] font-mono opacity-80">
+                        <span className="opacity-80">
                           Origin: {vault.origin || "local"}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Vault Actions Toolbar */}
+                  {/* Vault Actions Toolbar - Ask Folder is hero ink pill */}
                   <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50">
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => setSelectedUploadVault(vault.slug)}
-                      className="text-xs h-7.5 gap-1.5 px-2.5 border-border hover:bg-secondary"
-                    >
-                      <Upload className="h-3.5 w-3.5 text-emerald-400" />
-                      <span>Upload</span>
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="secondary"
                       onClick={() => handleAskVault(vault)}
-                      className="text-xs h-7.5 gap-1.5 px-3 bg-surface-subtle hover:bg-secondary text-foreground font-medium"
+                      className="text-xs h-8 gap-1.5 px-3 bg-foreground text-background hover:bg-foreground/90 font-medium shadow-sm"
                     >
-                      <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
+                      <MessageSquare className="h-3.5 w-3.5" />
                       <span>Ask Folder</span>
                     </Button>
 
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleOpenShare(vault)}
-                      className="text-xs h-7.5 gap-1.5 px-2.5 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
+                      onClick={() => setSelectedUploadVault(vault.slug)}
+                      className="text-xs h-8 gap-1.5 px-2.5 border-border hover:bg-secondary"
                     >
-                      <Share2 className="h-3.5 w-3.5 text-emerald-400" />
+                      <Upload className="h-3.5 w-3.5 text-trust" />
+                      <span>Upload</span>
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenShare(vault)}
+                      className="text-xs h-8 gap-1.5 px-2.5 border-border hover:bg-secondary"
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
                       <span>Assign / Share</span>
                     </Button>
 
                     {/* Folder More Actions */}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button className="h-7.5 w-7.5 rounded-lg border border-border flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
+                        <button className="h-8 w-8 rounded-lg border border-border flex items-center justify-center hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors">
                           <MoreVertical className="h-4 w-4" />
                         </button>
                       </DropdownMenuTrigger>
@@ -434,13 +460,13 @@ export const SourcesView: React.FC = () => {
                           onClick={() => handleOpenShare(vault)}
                           className="cursor-pointer gap-2"
                         >
-                          <Users className="h-3.5 w-3.5 text-emerald-400" />
+                          <Users className="h-3.5 w-3.5 text-trust" />
                           <span>Manage Permissions</span>
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => setDeletingVault(vault)}
-                          className="cursor-pointer gap-2 text-rose-400 focus:text-rose-400"
+                          className="cursor-pointer gap-2 text-deny focus:text-deny"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           <span>Delete Folder</span>
@@ -476,123 +502,156 @@ export const SourcesView: React.FC = () => {
                       </span>
                     </div>
 
-                    {vault.documents && vault.documents.length > 0 ? (
-                      <div className="grid grid-cols-1 gap-2">
-                        {vault.documents.map((doc) => {
-                          const ext = doc.title.split(".").pop()?.toLowerCase() || ""
-                          const isImage = ["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext) || doc.resource_type === "IMAGE_OCR"
-                          const isVideo = ["mp4", "mkv", "mov", "avi", "webm"].includes(ext) || doc.resource_type === "VIDEO"
-                          const isAudio = ["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) || doc.resource_type === "AUDIO"
-                          const isCode = ["py", "js", "ts", "tsx", "jsx", "json", "csv", "sql", "html", "css"].includes(ext) || doc.resource_type === "CODE"
+                    {(() => {
+                      const visibleDocs = (vault.documents || []).filter((doc) => {
+                        if (modalityFilter === "ALL") return true
+                        const ext = doc.title.split(".").pop()?.toLowerCase() || ""
+                        const isImage =
+                          ["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext) ||
+                          doc.resource_type === "IMAGE_OCR"
+                        const isVideo =
+                          ["mp4", "mkv", "mov", "avi", "webm"].includes(ext) ||
+                          doc.resource_type === "VIDEO"
+                        const isAudio =
+                          ["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) ||
+                          doc.resource_type === "AUDIO"
+                        const isCode =
+                          ["py", "js", "ts", "tsx", "jsx", "json", "csv", "sql", "html", "css"].includes(ext) ||
+                          doc.resource_type === "CODE"
 
-                          return (
-                            <div
-                              key={doc.resource_id}
-                              className="group/item flex items-center justify-between p-3 rounded-xl border border-border/70 bg-surface-subtle/40 hover:bg-surface-subtle hover:border-emerald-500/30 transition-all gap-3"
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border ${
-                                  isImage ? "bg-indigo-500/10 border-indigo-500/25 text-indigo-400" :
-                                  isVideo ? "bg-amber-500/10 border-amber-500/25 text-amber-400" :
-                                  isAudio ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-400" :
-                                  isCode ? "bg-sky-500/10 border-sky-500/25 text-sky-400" :
-                                  "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-                                }`}>
-                                  {isImage ? <ImageIcon className="h-4 w-4" /> :
-                                   isVideo ? <VideoIcon className="h-4 w-4" /> :
-                                   isAudio ? <AudioIcon className="h-4 w-4" /> :
-                                   isCode ? <CodeIcon className="h-4 w-4" /> :
-                                   <FileText className="h-4 w-4" />}
+                        if (modalityFilter === "IMAGE") return isImage
+                        if (modalityFilter === "VIDEO") return isVideo
+                        if (modalityFilter === "AUDIO") return isAudio
+                        if (modalityFilter === "CODE") return isCode
+                        if (modalityFilter === "DOC") return !isImage && !isVideo && !isAudio && !isCode
+                        return true
+                      })
+
+                      return visibleDocs.length > 0 ? (
+                        <div className="grid grid-cols-1 gap-2">
+                          {visibleDocs.map((doc) => {
+                            const ext = doc.title.split(".").pop()?.toLowerCase() || ""
+                            const isImage =
+                              ["png", "jpg", "jpeg", "webp", "bmp", "tiff"].includes(ext) ||
+                              doc.resource_type === "IMAGE_OCR"
+                            const isVideo =
+                              ["mp4", "mkv", "mov", "avi", "webm"].includes(ext) ||
+                              doc.resource_type === "VIDEO"
+                            const isAudio =
+                              ["mp3", "wav", "m4a", "ogg", "flac"].includes(ext) ||
+                              doc.resource_type === "AUDIO"
+                            const isCode =
+                              ["py", "js", "ts", "tsx", "jsx", "json", "csv", "sql", "html", "css"].includes(ext) ||
+                              doc.resource_type === "CODE"
+
+                            return (
+                              <div
+                                key={doc.resource_id}
+                                className="group/item flex items-center justify-between p-3 rounded-xl border border-border bg-surface hover:bg-surface-subtle/50 transition-all gap-3"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 border border-border bg-secondary">
+                                    {isImage ? (
+                                      <Iris size={16} className="text-permit" />
+                                    ) : isVideo ? (
+                                      <Reel size={16} className="text-beam" />
+                                    ) : isAudio ? (
+                                      <Wave size={16} className="text-hold" />
+                                    ) : isCode ? (
+                                      <Brackets size={16} className="text-trust" />
+                                    ) : (
+                                      <Sheet size={16} className="text-trust" />
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-medium text-foreground truncate">
+                                        {doc.title}
+                                      </span>
+                                      <Strata level={doc.classification} size="sm" />
+                                      <span className="text-[9px] font-mono px-1 py-0.2 rounded border uppercase font-medium border-border/60 text-muted-foreground bg-secondary">
+                                        {isImage
+                                          ? "IMAGE OCR"
+                                          : isVideo
+                                          ? "VIDEO"
+                                          : isAudio
+                                          ? "AUDIO"
+                                          : isCode
+                                          ? "CODE"
+                                          : "DOC"}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono mt-0.5">
+                                      <span>{doc.chunks_count} Chunks</span>
+                                      <span>•</span>
+                                      <span className="opacity-80">
+                                        ID: {doc.resource_id}
+                                      </span>
+                                      <span>•</span>
+                                      <span className="flex items-center gap-1 text-permit">
+                                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-permit" />
+                                        Indexed
+                                      </span>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-semibold text-foreground truncate">
-                                      {doc.title}
-                                    </span>
-                                    <Badge
-                                      variant="clearance"
-                                      className="text-[9px] py-0 px-1 font-mono"
-                                    >
-                                      L{doc.classification}
-                                    </Badge>
-                                    <span className={`text-[9px] font-mono px-1 py-0.2 rounded border uppercase font-medium ${
-                                      isImage ? "border-indigo-500/30 text-indigo-300 bg-indigo-500/5" :
-                                      isVideo ? "border-amber-500/30 text-amber-300 bg-amber-500/5" :
-                                      isAudio ? "border-emerald-500/30 text-emerald-300 bg-emerald-500/5" :
-                                      isCode ? "border-sky-500/30 text-sky-300 bg-sky-500/5" :
-                                      "border-border/60 text-muted-foreground bg-surface-raised"
-                                    }`}>
-                                      {isImage ? "IMAGE OCR" : isVideo ? "VIDEO" : isAudio ? "AUDIO" : isCode ? "CODE" : "DOC"}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground mt-0.5">
-                                    <span>{doc.chunks_count} Chunks</span>
-                                    <span>•</span>
-                                    <span className="font-mono text-[9px] text-muted-foreground/80">
-                                      ID: {doc.resource_id}
-                                    </span>
-                                    <span>•</span>
-                                    <span>
-                                      {doc.created_at
-                                        ? new Date(doc.created_at).toLocaleDateString()
-                                        : "Indexed"}
-                                    </span>
-                                  </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleAskVault(vault, doc)}
+                                    className="text-xs h-7 gap-1 px-2.5 text-trust hover:bg-secondary font-medium"
+                                  >
+                                    <MessageSquare className="h-3.5 w-3.5" />
+                                    <span>Ask File</span>
+                                  </Button>
+
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleOpenShare(vault, doc)}
+                                    className="text-xs h-7 gap-1 px-2 text-muted-foreground hover:text-foreground hover:bg-secondary font-medium"
+                                    title="Share access to this specific file"
+                                  >
+                                    <Share2 className="h-3.5 w-3.5" />
+                                    <span>Share</span>
+                                  </Button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDeletingDoc({ vaultSlug: vault.slug, doc })
+                                    }
+                                    className="p-1.5 rounded-md hover:bg-deny/10 text-muted-foreground hover:text-deny transition-colors"
+                                    title="Delete document"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
                                 </div>
                               </div>
-
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleAskVault(vault, doc)}
-                                  className="text-xs h-7 gap-1 px-2.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 font-medium"
-                                >
-                                  <MessageSquare className="h-3.5 w-3.5" />
-                                  <span>Ask This File</span>
-                                </Button>
-
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => handleOpenShare(vault, doc)}
-                                  className="text-xs h-7 gap-1 px-2 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 font-medium"
-                                  title="Share access to this specific file"
-                                >
-                                  <Share2 className="h-3.5 w-3.5" />
-                                  <span>Share File</span>
-                                </Button>
-
-                                <button
-                                  onClick={() =>
-                                    setDeletingDoc({ vaultSlug: vault.slug, doc })
-                                  }
-                                  className="p-1.5 rounded-md hover:bg-rose-500/10 text-muted-foreground hover:text-rose-400 transition-colors"
-                                  title="Delete document"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="p-5 rounded-xl border border-dashed border-border/80 bg-surface-subtle/20 text-center space-y-2">
-                        <p className="text-xs text-muted-foreground">
-                          No documents or media ingested into this folder yet.
-                        </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setSelectedUploadVault(vault.slug)}
-                          className="text-xs h-7.5 gap-1.5 border-border"
-                        >
-                          <Upload className="h-3.5 w-3.5 text-emerald-400" />
-                          <span>Upload Files & Media</span>
-                        </Button>
-                      </div>
-                    )}
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="p-5 rounded-xl border border-dashed border-border/80 bg-surface text-center space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            {vault.documents && vault.documents.length > 0
+                              ? "No documents match the selected modality filter."
+                              : "No documents or media ingested into this folder yet."}
+                          </p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setSelectedUploadVault(vault.slug)}
+                            className="text-xs h-7.5 gap-1.5 border-border"
+                          >
+                            <Upload className="h-3.5 w-3.5 text-trust" />
+                            <span>Upload Files & Media</span>
+                          </Button>
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
               </div>

@@ -1,32 +1,28 @@
 import React, { useState } from "react"
 import {
-  Plus,
-  MessageSquare,
-  FileText,
-  ShieldCheck,
-  KeyRound,
-  Network,
-  History,
-  ShieldAlert,
-  Database,
-  Settings,
+  Add,
+  Ask,
+  Sheet,
+  Compartment,
+  Grant,
+  Mesh,
+  Ledger,
+  Verify,
+  Tune,
   Pin,
-  Trash2,
-  Edit2,
-  Check,
-  MoreVertical,
-  Image as ImageIcon,
-  Video as VideoIcon,
-  Music as MusicIcon,
-  Code2,
-  Sparkles,
-  Layers,
-} from "lucide-react"
+  Trash,
+  Edit,
+  More,
+  Frame,
+  Reel,
+  Wave,
+  Brackets,
+  Aperture,
+} from "../../glyphs"
 import { useApp } from "../../context/AppContext"
 import { Conversation } from "../../types"
 import { Button } from "../ui/button"
 import { ScrollArea } from "../ui/scroll-area"
-import { Separator } from "../ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip"
 import {
   DropdownMenu,
@@ -34,7 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu"
-import { Badge } from "../ui/badge"
+import { cn } from "../../lib/utils"
 
 export const Sidebar: React.FC = () => {
   const {
@@ -84,68 +80,54 @@ export const Sidebar: React.FC = () => {
     setEditingId(null)
   }
 
+  // Modality visual identities per DESIGN.md §3.3
   const getConversationVisual = (conv: Conversation) => {
     const fileName = conv.selectedFileName?.toLowerCase() || ""
     if (fileName.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/)) {
       return {
-        Icon: ImageIcon,
-        badgeBg: "bg-amber-500/15 text-amber-400 border border-amber-500/30",
-        fileColor: "text-amber-400",
+        Icon: Frame,
+        badgeBg: "bg-permit/15 text-permit border border-permit/30",
         label: "Image",
       }
     }
     if (fileName.match(/\.(mp4|mov|avi|mkv|webm)$/)) {
       return {
-        Icon: VideoIcon,
-        badgeBg: "bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30",
-        fileColor: "text-fuchsia-400",
+        Icon: Reel,
+        badgeBg: "bg-secondary text-foreground border border-border",
         label: "Video",
       }
     }
     if (fileName.match(/\.(mp3|wav|ogg|m4a|flac)$/)) {
       return {
-        Icon: MusicIcon,
-        badgeBg: "bg-rose-500/15 text-rose-400 border border-rose-500/30",
-        fileColor: "text-rose-400",
+        Icon: Wave,
+        badgeBg: "bg-hold/15 text-hold border border-hold/30",
         label: "Audio",
       }
     }
     if (fileName.match(/\.(py|ts|js|jsx|tsx|html|css|json|sql|sh)$/)) {
       return {
-        Icon: Code2,
-        badgeBg: "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30",
-        fileColor: "text-cyan-400",
+        Icon: Brackets,
+        badgeBg: "bg-trust/15 text-trust border border-trust/30",
         label: "Code",
       }
     }
-    if (fileName.match(/\.(pdf|docx|doc|txt|md|csv|xlsx|pptx)$/)) {
+    if (fileName.match(/\.(pdf|docx|doc|txt|md|csv|xlsx|pptx)$/) || conv.selectedFileName) {
       return {
-        Icon: FileText,
-        badgeBg: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
-        fileColor: "text-emerald-400",
+        Icon: Sheet,
+        badgeBg: "bg-secondary text-muted-foreground border border-border",
         label: "Document",
-      }
-    }
-    if (conv.selectedFileName) {
-      return {
-        Icon: FileText,
-        badgeBg: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30",
-        fileColor: "text-emerald-400",
-        label: "File",
       }
     }
     if (conv.vaultSlug) {
       return {
-        Icon: Layers,
-        badgeBg: "bg-indigo-500/15 text-indigo-400 border border-indigo-500/30",
-        fileColor: "text-indigo-400",
-        label: "Folder",
+        Icon: Compartment,
+        badgeBg: "bg-secondary text-foreground border border-border",
+        label: "Compartment",
       }
     }
     return {
-      Icon: Sparkles,
-      badgeBg: "bg-sky-500/15 text-sky-400 border border-sky-500/30",
-      fileColor: "text-sky-400",
+      Icon: Aperture,
+      badgeBg: "bg-secondary text-muted-foreground border border-border",
       label: "General",
     }
   }
@@ -162,23 +144,26 @@ export const Sidebar: React.FC = () => {
           <TooltipTrigger asChild>
             <button
               onClick={() => selectConversation(conv.id)}
-              className={`w-9 h-9 mx-auto rounded-md flex items-center justify-center transition-colors mb-1 ${
+              className={cn(
+                "w-9 h-9 mx-auto rounded-lg flex items-center justify-center transition-colors mb-1 cursor-pointer",
                 isActive
-                  ? "bg-secondary text-foreground font-medium ring-1 ring-border"
+                  ? "bg-secondary text-foreground ring-1 ring-border shadow-xs"
                   : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-              }`}
+              )}
             >
-              <ItemIcon className="h-4 w-4" />
+              <ItemIcon size={16} />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">
             <p className="font-medium text-xs">{conv.title}</p>
             {conv.selectedFileName ? (
-              <p className={`text-[10px] font-mono ${visual.fileColor}`}>
+              <p className="text-[10px] font-mono text-muted-foreground">
                 {visual.label}: {conv.selectedFileName}
               </p>
             ) : (
-              <p className="text-[10px] text-muted-foreground">{conv.vaultSlug} · All files</p>
+              <p className="text-[10px] text-muted-foreground">
+                {conv.vaultSlug || "General scope"}
+              </p>
             )}
           </TooltipContent>
         </Tooltip>
@@ -188,86 +173,68 @@ export const Sidebar: React.FC = () => {
     return (
       <div
         key={conv.id}
-        className={`group relative flex items-center justify-between px-2.5 py-2 rounded-lg text-xs transition-colors mb-1 cursor-pointer ${
+        className={cn(
+          "group relative flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors mb-1 cursor-pointer",
           isActive
-            ? "bg-secondary/90 text-foreground font-medium shadow-xs ring-1 ring-border/50"
+            ? "bg-secondary text-foreground font-medium border-l-2 border-beam pl-2 shadow-xs"
             : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
-        }`}
+        )}
         onClick={() => {
           if (!isEditing) selectConversation(conv.id)
         }}
       >
-        <div className="flex items-start gap-2.5 min-w-0 flex-1 mr-1">
-          {/* Distinct Visual Avatar Badge */}
+        <div className="flex items-center gap-2 min-w-0 flex-1 mr-1">
           <div
-            className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 mt-0.5 ${visual.badgeBg}`}
+            className={cn(
+              "w-5 h-5 rounded flex items-center justify-center shrink-0",
+              visual.badgeBg
+            )}
             title={visual.label}
           >
             {conv.pinned ? (
-              <Pin className="h-3 w-3 text-emerald-400" />
+              <Pin size={11} className="text-beam" />
             ) : (
-              <ItemIcon className="h-3.5 w-3.5" />
+              <ItemIcon size={12} />
             )}
           </div>
 
           {isEditing ? (
-            <div className="flex items-center gap-1 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
-              <input
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") handleSaveRename(conv.id)
-                  if (e.key === "Escape") setEditingId(null)
-                }}
-                autoFocus
-                className="w-full bg-surface-subtle border border-border rounded px-1.5 py-0.5 text-xs text-foreground outline-none"
-              />
-              <button
-                onClick={() => handleSaveRename(conv.id)}
-                className="text-emerald-400 hover:text-emerald-300 p-0.5"
-              >
-                <Check className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            <input
+              type="text"
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={() => handleSaveRename(conv.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveRename(conv.id)
+                if (e.key === "Escape") setEditingId(null)
+              }}
+              autoFocus
+              className="bg-background text-foreground text-xs px-1.5 py-0.5 rounded border border-border w-full focus:outline-none focus:ring-1 focus:ring-trust"
+              onClick={(e) => e.stopPropagation()}
+            />
           ) : (
-            <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-              <span className="truncate text-[12px] font-medium leading-snug">{conv.title}</span>
-              <div className="flex items-center gap-1 text-[10px] mt-0.5 text-muted-foreground">
-                {conv.selectedFileName ? (
-                  <span className={`flex items-center gap-1 font-mono truncate ${visual.fileColor} font-medium`}>
-                    <ItemIcon className="h-2.5 w-2.5 shrink-0" />
-                    <span className="truncate">{conv.selectedFileName}</span>
-                  </span>
-                ) : (
-                  <span className="truncate font-mono opacity-70">
-                    {conv.vaultSlug} · All files
-                  </span>
-                )}
-              </div>
-            </div>
+            <span className="truncate text-xs select-none">{conv.title}</span>
           )}
         </div>
 
-        {/* Action Menu (Always Visible For Every Chat) */}
+        {/* Action Menu Trigger (Visible on hover or if active) */}
         {!isEditing && (
           <div
-            className="shrink-0 z-20 flex items-center ml-1"
+            className={cn(
+              "shrink-0",
+              isActive
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 transition-opacity"
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className={`p-1.5 rounded-md transition-colors border shadow-xs ${
-                    isActive
-                      ? "text-foreground bg-background/60 hover:bg-background border-border/60 hover:text-foreground"
-                      : "text-muted-foreground/75 hover:text-foreground hover:bg-secondary/80 border-transparent hover:border-border/40"
-                  }`}
-                  aria-label="Conversation options"
-                  title="Conversation options (Pin, Rename, Delete)"
+                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer focus:outline-none"
                 >
-                  <MoreVertical className="h-3.5 w-3.5" />
+                  <More size={13} />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-36 text-xs">
@@ -275,21 +242,21 @@ export const Sidebar: React.FC = () => {
                   onClick={() => pinConversation(conv.id)}
                   className="text-xs cursor-pointer"
                 >
-                  <Pin className="h-3.5 w-3.5 mr-2 text-emerald-400" />
+                  <Pin size={13} className="mr-2 text-beam" />
                   {conv.pinned ? "Unpin" : "Pin"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => handleStartRename(conv)}
                   className="text-xs cursor-pointer"
                 >
-                  <Edit2 className="h-3.5 w-3.5 mr-2 text-sky-400" />
+                  <Edit size={13} className="mr-2 text-muted-foreground" />
                   Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => deleteConversation(conv.id)}
-                  className="text-xs text-rose-400 focus:text-rose-400 cursor-pointer"
+                  className="text-xs text-deny focus:text-deny cursor-pointer"
                 >
-                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                  <Trash size={13} className="mr-2" />
                   Delete
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -300,23 +267,38 @@ export const Sidebar: React.FC = () => {
     )
   }
 
-  const navLinks = [
-    { id: "chat", label: "Chat", icon: MessageSquare, category: "WORKSPACE" },
-    { id: "sources", label: "Sources", icon: FileText, category: "WORKSPACE" },
-    { id: "vaults", label: "Vaults", icon: ShieldCheck, category: "WORKSPACE" },
-    { id: "access", label: "Access & Grants", icon: KeyRound, category: "SECURITY" },
-    { id: "federation", label: "LAN Federation", icon: Network, category: "SECURITY" },
-    { id: "audit", label: "Audit Trail", icon: History, category: "SECURITY" },
-    { id: "chunks", label: "Chunk Store", icon: Database, category: "SECURITY", badge: "Live" },
-    { id: "settings", label: "Settings", icon: Settings, category: "SYSTEM" },
+  const navGroups = [
+    {
+      category: "Workspace",
+      items: [
+        { id: "chat", label: "Chat", icon: Ask },
+        { id: "sources", label: "Sources", icon: Sheet },
+        { id: "vaults", label: "Compartments", icon: Compartment },
+      ],
+    },
+    {
+      category: "Security",
+      items: [
+        { id: "access", label: "Access & Grants", icon: Grant },
+        { id: "federation", label: "LAN Federation", icon: Mesh },
+        { id: "audit", label: "Audit Ledger", icon: Ledger },
+        { id: "chunks", label: "Chunk Store", icon: Verify, isLive: true },
+        { id: "tests", label: "Verification", icon: Verify },
+      ],
+    },
+    {
+      category: "System",
+      items: [{ id: "settings", label: "Settings", icon: Tune }],
+    },
   ]
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <TooltipProvider delayDuration={300}>
       <aside
-        className={`border-r border-border bg-surface flex flex-col justify-between transition-all duration-200 z-20 shrink-0 ${
+        className={cn(
+          "border-r border-border bg-surface flex flex-col justify-between transition-all duration-200 z-20 shrink-0 select-none",
           sidebarCollapsed ? "w-16" : "w-64"
-        }`}
+        )}
       >
         {/* Top: New Chat Action */}
         <div className="p-3">
@@ -326,9 +308,9 @@ export const Sidebar: React.FC = () => {
                 <Button
                   onClick={() => startNewChat()}
                   size="icon"
-                  className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                  className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg cursor-pointer shadow-xs"
                 >
-                  <Plus className="h-4 w-4" />
+                  <Add size={16} />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="right">New chat</TooltipContent>
@@ -336,10 +318,13 @@ export const Sidebar: React.FC = () => {
           ) : (
             <Button
               onClick={() => startNewChat()}
-              className="w-full justify-start gap-2 bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-medium h-9"
+              className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 flex items-center justify-center gap-2 rounded-lg cursor-pointer shadow-xs text-xs font-medium"
             >
-              <Plus className="h-4 w-4" />
+              <Add size={15} />
               <span>New chat</span>
+              <span className="font-mono text-[10px] text-primary-foreground/60 ml-auto">
+                ⌘⇧O
+              </span>
             </Button>
           )}
         </div>
@@ -347,10 +332,10 @@ export const Sidebar: React.FC = () => {
         {/* Middle: Conversation History */}
         <ScrollArea className="flex-1 px-2.5">
           {pinnedConversations.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-3.5">
               {!sidebarCollapsed && (
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider">
-                  Pinned
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground/80 lowercase tracking-normal">
+                  pinned
                 </div>
               )}
               {pinnedConversations.map(renderConversationItem)}
@@ -358,10 +343,10 @@ export const Sidebar: React.FC = () => {
           )}
 
           {todayConversations.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-3.5">
               {!sidebarCollapsed && (
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider">
-                  Today
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground/80 lowercase tracking-normal">
+                  today
                 </div>
               )}
               {todayConversations.map(renderConversationItem)}
@@ -369,10 +354,10 @@ export const Sidebar: React.FC = () => {
           )}
 
           {yesterdayConversations.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-3.5">
               {!sidebarCollapsed && (
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider">
-                  Yesterday
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground/80 lowercase tracking-normal">
+                  yesterday
                 </div>
               )}
               {yesterdayConversations.map(renderConversationItem)}
@@ -380,10 +365,10 @@ export const Sidebar: React.FC = () => {
           )}
 
           {earlierConversations.length > 0 && (
-            <div className="mb-4">
+            <div className="mb-3.5">
               {!sidebarCollapsed && (
-                <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider">
-                  Earlier
+                <div className="px-2 py-1 text-[11px] font-medium text-muted-foreground/80 lowercase tracking-normal">
+                  earlier
                 </div>
               )}
               {earlierConversations.map(renderConversationItem)}
@@ -391,58 +376,69 @@ export const Sidebar: React.FC = () => {
           )}
         </ScrollArea>
 
-        {/* Bottom: Main Section Navigation */}
-        <div className="p-2 border-t border-border bg-surface-subtle/50">
-          <div className="space-y-0.5">
-            {navLinks.map((item) => {
-              const Icon = item.icon
-              const isSelected = currentView === item.id
+        {/* Bottom: Grouped Section Navigation */}
+        <div className="p-2 border-t border-border bg-surface-raised/40 space-y-2">
+          {navGroups.map((group) => (
+            <div key={group.category} className="space-y-0.5">
+              {!sidebarCollapsed && (
+                <div className="px-2 pt-1 pb-0.5 text-[10.5px] font-medium text-muted-foreground/70 tracking-tight">
+                  {group.category}
+                </div>
+              )}
+              {group.items.map((item) => {
+                const Icon = item.icon
+                const isSelected = currentView === item.id
 
-              if (sidebarCollapsed) {
+                if (sidebarCollapsed) {
+                  return (
+                    <Tooltip key={item.id}>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={() => navigate(item.id as any)}
+                          className={cn(
+                            "w-9 h-9 mx-auto rounded-lg flex items-center justify-center transition-colors cursor-pointer relative",
+                            isSelected
+                              ? "bg-secondary text-foreground font-medium ring-1 ring-border"
+                              : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                          )}
+                        >
+                          <Icon size={16} />
+                          {item.isLive && (
+                            <span className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-trust animate-pulse" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">{item.label}</TooltipContent>
+                    </Tooltip>
+                  )
+                }
+
                 return (
-                  <Tooltip key={item.id}>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => navigate(item.id as any)}
-                        className={`w-9 h-9 mx-auto rounded-md flex items-center justify-center transition-colors ${
-                          isSelected
-                            ? "bg-secondary text-foreground font-medium"
-                            : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-                        }`}
-                      >
-                        <Icon className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {item.label} {item.badge && `(${item.badge})`}
-                    </TooltipContent>
-                  </Tooltip>
+                  <button
+                    key={item.id}
+                    onClick={() => navigate(item.id as any)}
+                    className={cn(
+                      "w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer",
+                      isSelected
+                        ? "bg-secondary text-foreground font-medium"
+                        : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Icon size={14} className="opacity-80" />
+                      <span>{item.label}</span>
+                    </div>
+                    {item.isLive && (
+                      <span className="flex items-center gap-1 text-[10px] font-mono text-trust">
+                        <span className="w-1.5 h-1.5 rounded-full bg-trust animate-pulse" />
+                        Live
+                      </span>
+                    )}
+                  </button>
                 )
-              }
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => navigate(item.id as any)}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors ${
-                    isSelected
-                      ? "bg-secondary text-foreground font-medium"
-                      : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Icon className="h-3.5 w-3.5 opacity-80" />
-                    <span>{item.label}</span>
-                  </div>
-                  {item.badge && (
-                    <Badge variant="success" className="text-[9px] py-0 px-1 font-mono">
-                      {item.badge}
-                    </Badge>
-                  )}
-                </button>
-              )
-            })}
-          </div>
+              })}
+            </div>
+          ))}
         </div>
       </aside>
     </TooltipProvider>

@@ -59,7 +59,27 @@ export default {
           denied: "hsl(var(--sec-denied))",
           warning: "hsl(var(--sec-warning))",
           neutral: "hsl(var(--sec-neutral))",
-        }
+          trust: "hsl(var(--sec-trust))",
+          beam: "hsl(var(--beam))",
+        },
+        permit: "hsl(var(--sec-allowed) / <alpha-value>)",
+        deny: "hsl(var(--sec-denied) / <alpha-value>)",
+        hold: "hsl(var(--sec-warning) / <alpha-value>)",
+        trust: "hsl(var(--sec-trust) / <alpha-value>)",
+        beam: "hsl(var(--beam) / <alpha-value>)",
+        faint: "hsl(var(--faint) / <alpha-value>)",
+      },
+      spacing: {
+        "0.2": "0.05rem",
+        "4.5": "1.125rem",
+        "7.5": "1.875rem",
+      },
+      screens: {
+        xs: "480px",
+      },
+      fontFamily: {
+        sans: ['"Geist Variable"', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['"Geist Mono Variable"', 'ui-monospace', 'monospace'],
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -75,10 +95,20 @@ export default {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        indeterminate: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(250%)" },
+        },
+        rise: {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "none" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        indeterminate: "indeterminate 1.5s linear infinite",
+        rise: "rise 0.22s cubic-bezier(0.16, 1, 0.3, 1) both",
       },
     },
   },

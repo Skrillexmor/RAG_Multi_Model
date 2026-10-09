@@ -30,6 +30,10 @@ import { Badge } from "../ui/badge"
 import { Input } from "../ui/input"
 import { RequestAccessModal } from "./RequestAccessModal"
 import { IssueGrantModal } from "./IssueGrantModal"
+import { TimeBar } from "../ui/time-bar"
+import { Strata } from "../ui/strata"
+import { Seal } from "../ui/seal"
+import { cn } from "../../lib/utils"
 import { DEMO_PERSONAS } from "../../lib/personas"
 import { toast } from "sonner"
 
@@ -128,14 +132,14 @@ export const AccessView: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-xl font-semibold text-foreground tracking-tight">
+            <h2 className="text-xl font-light text-foreground tracking-tight">
               Access Governance & JIT Grants
             </h2>
-            <Badge variant="outline" className="text-[10px] py-0 border-emerald-500/30 text-emerald-400">
-              NIST SP 800-162 (§13, §35)
-            </Badge>
+            <span className="font-mono text-[11px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border">
+              NIST SP 800-162
+            </span>
           </div>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Authoritative Ed25519-signed permission lifecycle, granular file-level scoping, and delegation control.
           </p>
         </div>
@@ -158,15 +162,14 @@ export const AccessView: React.FC = () => {
             onClick={() => setIsRequestModalOpen(true)}
             className="text-xs h-8 gap-1.5 border-border"
           >
-            <Clock className="h-3.5 w-3.5 text-amber-400" />
+            <Clock className="h-3.5 w-3.5 text-hold" />
             <span>Request Access</span>
           </Button>
 
           <Button
             size="sm"
-            variant="security"
             onClick={() => setIsIssueModalOpen(true)}
-            className="text-xs h-8 gap-1.5 font-medium"
+            className="text-xs h-8 gap-1.5 font-medium bg-foreground text-background hover:bg-foreground/90 shadow-sm"
           >
             <Plus className="h-3.5 w-3.5" />
             <span>Issue Direct Grant</span>
@@ -174,95 +177,101 @@ export const AccessView: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Stats Strip */}
+      {/* KPI Instruments */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="p-3.5 rounded-xl border border-border bg-surface-raised space-y-1">
+        <div className="p-3.5 rounded-xl border border-border bg-surface space-y-1 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted-foreground">Active Grants</span>
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[11px] text-muted-foreground uppercase font-medium">Active Grants</span>
+            <div className="w-2 h-2 rounded-full bg-permit animate-pulse" />
           </div>
-          <div className="text-xl font-bold font-mono text-emerald-400">{activeGrantsCount}</div>
-          <div className="text-[10px] text-muted-foreground">{grants.length} total recorded</div>
+          <div className="text-2xl font-light font-mono text-foreground">{activeGrantsCount}</div>
+          <div className="text-[10px] text-muted-foreground font-mono">{grants.length} total recorded</div>
         </div>
 
-        <div className="p-3.5 rounded-xl border border-border bg-surface-raised space-y-1">
+        <div className="p-3.5 rounded-xl border border-border bg-surface space-y-1 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted-foreground">Delegable Grants</span>
-            <Sparkles className="h-3 w-3 text-sky-400" />
+            <span className="text-[11px] text-muted-foreground uppercase font-medium">Delegable</span>
+            <Sparkles className="h-3 w-3 text-beam" />
           </div>
-          <div className="text-xl font-bold font-mono text-sky-400">{delegableCount}</div>
-          <div className="text-[10px] text-muted-foreground">Sub-delegation enabled</div>
+          <div className="text-2xl font-light font-mono text-beam">{delegableCount}</div>
+          <div className="text-[10px] text-muted-foreground font-mono">Sub-delegation enabled</div>
         </div>
 
-        <div className="p-3.5 rounded-xl border border-border bg-surface-raised space-y-1">
+        <div className="p-3.5 rounded-xl border border-border bg-surface space-y-1 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted-foreground">Pending Requests</span>
+            <span className="text-[11px] text-muted-foreground uppercase font-medium">Pending Requests</span>
             {pendingRequestsCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono">
+              <span className="px-1.5 py-0.2 rounded-full bg-hold/20 text-hold text-[10px] font-mono">
                 Action Req
               </span>
             )}
           </div>
-          <div className="text-xl font-bold font-mono text-amber-400">{pendingRequestsCount}</div>
-          <div className="text-[10px] text-muted-foreground">Separation of duties (§37)</div>
+          <div className="text-2xl font-light font-mono text-hold">{pendingRequestsCount}</div>
+          <div className="text-[10px] text-muted-foreground font-mono">Separation of duties (§37)</div>
         </div>
 
-        <div className="p-3.5 rounded-xl border border-border bg-surface-raised space-y-1">
+        <div className="p-3.5 rounded-xl border border-border bg-surface space-y-1 shadow-sm">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-muted-foreground">Authorization Lease</span>
-            <Clock className="h-3 w-3 text-emerald-400" />
+            <span className="text-[11px] text-muted-foreground uppercase font-medium">Session Lease</span>
+            <Clock className="h-3 w-3 text-permit" />
           </div>
-          <div className="text-xl font-bold font-mono text-foreground">
+          <div className="text-2xl font-light font-mono text-foreground">
             {Math.floor(leaseSecondsRemaining / 60)}m {leaseSecondsRemaining % 60}s
           </div>
-          <div className="text-[10px] text-muted-foreground">Current session window</div>
+          <div className="text-[10px] text-muted-foreground font-mono">Current lease window</div>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-border/80 pb-2">
+      {/* Navigation Tabs with Sliding Underline Style */}
+      <div className="flex items-center gap-1 border-b border-border pb-1">
         <button
+          type="button"
           onClick={() => setActiveTab("grants")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-[5px]",
             activeTab === "grants"
-              ? "bg-secondary text-foreground border border-border shadow-xs"
-              : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
-          }`}
+              ? "border-beam text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
         >
-          <KeyRound className="h-3.5 w-3.5 text-emerald-400" />
-          <span>Active & Historical Grants</span>
-          <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-surface-subtle font-mono">
+          <KeyRound className="h-3.5 w-3.5 text-permit" />
+          <span>Grants</span>
+          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-secondary font-mono">
             {filteredGrants.length}
           </span>
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab("requests")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-[5px]",
             activeTab === "requests"
-              ? "bg-secondary text-foreground border border-border shadow-xs"
-              : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
-          }`}
+              ? "border-beam text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
         >
-          <Clock className="h-3.5 w-3.5 text-amber-400" />
-          <span>Access Requests</span>
+          <Clock className="h-3.5 w-3.5 text-hold" />
+          <span>Requests</span>
           {pendingRequestsCount > 0 && (
-            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-hold/20 text-hold font-mono font-semibold">
               {pendingRequestsCount}
             </span>
           )}
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab("matrix")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+          className={cn(
+            "flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-[5px]",
             activeTab === "matrix"
-              ? "bg-secondary text-foreground border border-border shadow-xs"
-              : "text-muted-foreground hover:text-foreground hover:bg-secondary/40"
-          }`}
+              ? "border-beam text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          )}
         >
-          <ShieldCheck className="h-3.5 w-3.5 text-sky-400" />
-          <span>Zero-Trust Role & Clearance Matrix</span>
+          <ShieldCheck className="h-3.5 w-3.5 text-trust" />
+          <span>Clearance & Role Matrix</span>
         </button>
       </div>
 
@@ -420,19 +429,17 @@ export const AccessView: React.FC = () => {
                             )}
                           </td>
 
-                          {/* Validity */}
+                          {/* Validity with TimeBar */}
                           <td className="p-3 font-mono text-[11px]">
                             {g.valid_until ? (
-                              <div className="space-y-0.5">
-                                <div className={isExpired ? "text-rose-400 line-through" : "text-foreground"}>
+                              <div className="space-y-1.5 min-w-[130px]">
+                                <TimeBar from={g.valid_from} until={g.valid_until} />
+                                <div className={isExpired ? "text-deny line-through text-[10px]" : "text-foreground text-[10px]"}>
                                   Until {new Date(g.valid_until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground">
-                                  {new Date(g.valid_until).toLocaleDateString()}
                                 </div>
                               </div>
                             ) : (
-                              <span className="text-muted-foreground">No expiration</span>
+                              <span className="text-muted-foreground">Permanent</span>
                             )}
                           </td>
 
@@ -538,20 +545,28 @@ export const AccessView: React.FC = () => {
 
                   {req.state === "pending" && (
                     <div className="flex items-center gap-2 shrink-0 pt-2 sm:pt-0">
-                      <Button
-                        size="sm"
-                        variant="security"
-                        onClick={() => handleApprove(req.request_id)}
-                        disabled={actionInProgress === req.request_id}
-                        className="text-xs h-8 gap-1.5"
-                      >
-                        {actionInProgress === req.request_id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Check className="h-3.5 w-3.5" />
-                        )}
-                        <span>Approve Request</span>
-                      </Button>
+                      {principal?.user_id === req.requester_id || persona.username === req.requester_id ? (
+                        <span
+                          className="text-[11px] text-muted-foreground italic px-2 py-1 bg-secondary rounded border border-border"
+                          title="Separation of Duties (§37): You cannot approve your own access request."
+                        >
+                          Self-approval restricted (SoD §37)
+                        </span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          onClick={() => handleApprove(req.request_id)}
+                          disabled={actionInProgress === req.request_id}
+                          className="text-xs h-8 gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium shadow-sm"
+                        >
+                          {actionInProgress === req.request_id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Check className="h-3.5 w-3.5" />
+                          )}
+                          <span>Approve Request</span>
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -591,21 +606,22 @@ export const AccessView: React.FC = () => {
                   return (
                     <tr
                       key={p.username}
-                      className={`transition-colors ${
-                        isCurrent ? "bg-emerald-500/5 hover:bg-emerald-500/10" : "hover:bg-surface-subtle/50"
-                      }`}
+                      className={cn(
+                        "transition-colors",
+                        isCurrent ? "bg-beam/5 border-l-2 border-l-beam font-medium" : "hover:bg-surface-subtle/40"
+                      )}
                     >
                       <td className="p-3">
                         <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center font-bold text-[10px] text-foreground">
+                          <div className="w-6 h-6 rounded-full bg-secondary border border-border flex items-center justify-center font-bold text-[10px] text-foreground">
                             {p.name.charAt(0)}
                           </div>
                           <div>
                             <div className="font-semibold text-foreground flex items-center gap-1.5">
                               <span>{p.name}</span>
                               {isCurrent && (
-                                <Badge variant="success" className="text-[8px] py-0 px-1">
-                                  You
+                                <Badge variant="secondary" className="text-[8px] py-0 px-1 border-beam/50 text-beam font-mono">
+                                  Active Session
                                 </Badge>
                               )}
                             </div>
@@ -615,20 +631,15 @@ export const AccessView: React.FC = () => {
                       </td>
 
                       <td className="p-3">
-                        <Badge
-                          variant="clearance"
-                          className="font-mono text-[10px] py-0"
-                        >
-                          Level {p.clearanceLevel}
-                        </Badge>
+                        <Strata level={p.clearanceLevel} size="sm" />
                       </td>
 
                       <td className="p-3">
                         <div className="flex gap-1 flex-wrap">
                           {p.roles.map((r, i) => (
-                            <Badge key={i} variant="outline" className="text-[9px] py-0 border-border text-muted-foreground font-mono">
+                            <span key={i} className="text-[9px] py-0.5 px-1.5 rounded bg-secondary border border-border text-muted-foreground font-mono">
                               {r}
-                            </Badge>
+                            </span>
                           ))}
                         </div>
                       </td>
@@ -636,7 +647,8 @@ export const AccessView: React.FC = () => {
                       <td className="p-3">
                         <div className="flex gap-1 flex-wrap">
                           {p.accessibleVaults.map((v, i) => (
-                            <span key={i} className="text-[10px] text-foreground/80 bg-surface border border-border/80 px-1.5 py-0.5 rounded font-mono">
+                            <span key={i} className="text-[10px] text-foreground bg-surface border border-border px-1.5 py-0.5 rounded font-mono inline-flex items-center gap-1">
+                              <Seal state="verified" size={10} />
                               {v}
                             </span>
                           ))}
