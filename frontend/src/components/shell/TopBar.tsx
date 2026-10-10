@@ -46,6 +46,7 @@ export const TopBar: React.FC = () => {
     isSessionWarning,
     renewSession,
     logout,
+    authConfig,
   } = useApp()
 
   return (
@@ -191,14 +192,6 @@ export const TopBar: React.FC = () => {
             <DropdownMenuSeparator />
 
             <DropdownMenuItem
-              onClick={() => setIsAuthModalOpen(true)}
-              className="flex items-center gap-2 py-1.5 text-xs cursor-pointer font-medium text-trust"
-            >
-              <LogIn className="h-3.5 w-3.5" />
-              <span>Login / Register User</span>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem
               onClick={() => setIsLlmModalOpen(true)}
               className="flex items-center gap-2 py-1.5 text-xs cursor-pointer text-foreground"
             >
@@ -214,34 +207,37 @@ export const TopBar: React.FC = () => {
               <span>Sign Out (Revoke Session)</span>
             </DropdownMenuItem>
 
-            <DropdownMenuSeparator />
-
-            <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-              Switch Persona (Demo Mode)
-            </div>
-
-            {DEMO_PERSONAS.map((p) => (
-              <DropdownMenuItem
-                key={p.username}
-                onClick={() => switchPersona(p.username)}
-                className="flex items-center justify-between py-2 text-xs cursor-pointer"
-              >
-                <div>
-                  <div className="font-medium text-foreground flex items-center gap-1.5">
-                    <span>{p.name}</span>
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      (L{p.clearanceLevel})
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {p.roleTitle}
-                  </div>
+            {(authConfig ? authConfig.demo_mode : true) && (
+              <>
+                <DropdownMenuSeparator />
+                <div className="px-2 py-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Switch Persona (Demo Mode)
                 </div>
-                {p.username === persona.username && (
-                  <Check className="h-4 w-4 text-permit" />
-                )}
-              </DropdownMenuItem>
-            ))}
+
+                {DEMO_PERSONAS.map((p) => (
+                  <DropdownMenuItem
+                    key={p.username}
+                    onClick={() => switchPersona(p.username)}
+                    className="flex items-center justify-between py-2 text-xs cursor-pointer"
+                  >
+                    <div>
+                      <div className="font-medium text-foreground flex items-center gap-1.5">
+                        <span>{p.name}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          (L{p.clearanceLevel})
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {p.roleTitle}
+                      </div>
+                    </div>
+                    {p.username === persona.username && (
+                      <Check className="h-4 w-4 text-permit" />
+                    )}
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

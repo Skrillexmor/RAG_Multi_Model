@@ -19,6 +19,9 @@ import {
   SessionStatus,
   SystemMetrics,
   SystemGrantRecord,
+  AuthConfig,
+  MediaTicketResponse,
+  Conversation,
 } from "../types"
 
 const API_BASE = ""
@@ -100,6 +103,10 @@ class ApiClient {
   }
 
   // --- Auth APIs ---
+  async getAuthConfig(): Promise<AuthConfig> {
+    return this.request("/api/auth/config")
+  }
+
   async login(username: string, password?: string): Promise<{ access_token: string; token_type: string; principal: Principal }> {
     const res = await this.request<{ access_token: string; token_type: string; principal: Principal }>("/api/auth/login", {
       method: "POST",
@@ -329,7 +336,8 @@ class ApiClient {
     purpose = "general_query",
     resourceId?: string,
     history?: Array<{ role: string; content: string }>,
-    retrievalMode: RetrievalMode = "LOW"
+    retrievalMode: RetrievalMode = "LOW",
+    conversationId?: string
   ): Promise<RagQueryResponse> {
     const payload: Record<string, any> = { query, purpose, retrieval_mode: retrievalMode }
     if (resourceId) {
@@ -338,6 +346,9 @@ class ApiClient {
     if (history && history.length > 0) {
       payload.history = history
     }
+    if (conversationId) {
+      payload.conversation_id = conversationId
+    }
 
     const res = await this.request<any>(`/api/rag/${vaultSlug}/query`, {
       method: "POST",
@@ -345,11 +356,15 @@ class ApiClient {
     })
 
     const rawTrace = res.security_trace || {}
+    const effectiveMode = res.effective_retrieval_mode || rawTrace.effective_retrieval_mode || res.retrieval_mode || rawTrace.retrieval_mode || retrievalMode
     const normalizedTrace: RetrievalSecurityTrace = {
       request_id: rawTrace.request_id || `req_${Date.now()}`,
       principal: rawTrace.user_id || "principal",
       vault: rawTrace.vault_slug || vaultSlug,
       retrieval_mode: res.retrieval_mode || rawTrace.retrieval_mode || retrievalMode,
+      effective_retrieval_mode: effectiveMode,
+      elapsed_seconds: res.elapsed_seconds ?? rawTrace.elapsed_seconds,
+      conversation_id: res.conversation_id || rawTrace.conversation_id || conversationId,
       gate_a: rawTrace.gate_a || {
         compiled_filter_valid: true,
         candidates_count: rawTrace.gate_a_candidates_count ?? 0,
@@ -376,7 +391,103 @@ class ApiClient {
       refusal_reason: res.security_trace?.refusal_reason,
       security_trace: normalizedTrace,
       retrieval_mode: res.retrieval_mode || rawTrace.retrieval_mode || retrievalMode,
+      effective_retrieval_mode: effectiveMode,
+      elapsed_seconds: res.elapsed_seconds ?? rawTrace.elapsed_seconds,
+      conversation_id: res.conversation_id || rawTrace.conversation_id || conversationId,
     }
+  }
+
+  // --- Authoritative Server Conversations ---
+  async getConversations(): Promise<{ conversations: Conversation[] }> {
+    return this.request("/api/conversations")
+  }
+
+  async createConversation(payload: {
+    title?: string
+    vault_slug?: string
+    persona?: string
+    pinned?: boolean
+    conversation_id?: string
+    selected_file_id?: string
+    selected_file_name?: string
+  }): Promise<{ conversation: Conversation }> {
+    return this.request("/api/conversations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async getConversation(id: string): Promise<Conversation> {
+    return this.request(`/api/conversations/${id}`)
+  }
+
+  async updateConversation(
+    id: string,
+    payload: {
+      title?: string
+      vault_slug?: string
+      pinned?: boolean
+      preview?: string
+    }
+  ): Promise<Conversation> {
+    return this.request(`/api/conversations/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async deleteConversation(id: string): Promise<{ status: string; id: string }> {
+    return this.request(`/api/conversations/${id}`, {
+      method: "DELETE",
+    })
+  }
+
+  async appendConversationMessage(
+    id: string,
+    payload: {
+      role: string
+      content: string
+      message_metadata?: any
+    }
+  ): Promise<{ message_id: string; conversation_id: string }> {
+    return this.request(`/api/conversations/${id}/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async getConversationMemory(id: string): Promise<{
+    conversation_id: string
+    memory: {
+      rolling_summary?: string
+      recent_turns: Array<{ role: string; content: string }>
+    }
+  }> {
+    return this.request(`/api/conversations/${id}/memory`)
+  }
+
+  // --- Protected Media ---
+  async getMediaTicket(filePath: string): Promise<MediaTicketResponse> {
+    return this.request("/api/media/ticket", {
+      method: "POST",
+      body: JSON.stringify({ file_path: filePath }),
+    })
+  }
+
+  async fetchMediaBlob(mediaUrl: string, abortSignal?: AbortSignal): Promise<Blob> {
+    const headers: Record<string, string> = {}
+    if (this.token) {
+      headers["Authorization"] = `Bearer ${this.token}`
+    }
+    const response = await fetch(`${API_BASE}${mediaUrl}`, {
+      method: "GET",
+      headers,
+      signal: abortSignal,
+    })
+    if (!response.ok) {
+      throw new ApiError(`Failed to fetch media: ${response.statusText}`, response.status)
+    }
+    return response.blob()
   }
 
   // --- Grants & JIT Access ---

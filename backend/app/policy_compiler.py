@@ -58,12 +58,14 @@ class PolicyCompiler:
         must_clauses: List[Dict[str, Any]] = [
             {"key": "vault_id", "match": {"value": vault.vault_id}},
             {"key": "min_clearance", "range": {"lte": principal.clearance}},
-            {"key": "classification", "range": {"lte": effective_ceiling}},
-            {"key": "acl_selector", "match": {"any": subjects}}
+            {"key": "classification", "range": {"lte": effective_ceiling}}
         ]
 
         # 2. Folder-wide vs Granular Resource Scoping (§4, §32)
-        is_owner = (principal.user_id == vault.owner_id)
+        p_uid_clean = principal.user_id.replace("user:", "").strip().lower()
+        p_uname_clean = principal.username.strip().lower()
+        v_owner_clean = (vault.owner_id or "").replace("user:", "").strip().lower()
+        is_owner = (p_uid_clean == v_owner_clean or p_uname_clean == v_owner_clean)
         is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
         has_folder_wide_grant = any(
             not g.selector or g.selector.get("all") is True or 
@@ -71,8 +73,13 @@ class PolicyCompiler:
             for g in matching_grants
         )
 
-        if is_owner or is_admin or has_folder_wide_grant:
-            # Caller has folder-wide access: respect explicit resource_id filter if provided
+        if is_owner or is_admin:
+            # Vault owner or admin: owns/administers folder; respect explicit resource_id filter if provided
+            if resource_id:
+                must_clauses.append({"key": "resource_id", "match": {"value": resource_id}})
+        elif has_folder_wide_grant:
+            # Caller has folder-wide grant: match role/user subjects in acl_selector
+            must_clauses.append({"key": "acl_selector", "match": {"any": subjects}})
             if resource_id:
                 must_clauses.append({"key": "resource_id", "match": {"value": resource_id}})
         else:

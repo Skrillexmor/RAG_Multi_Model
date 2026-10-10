@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
 from .database import db
-from .models import Grant, AccessRequest, Principal
+from .models import Grant, AccessRequest, Principal, ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE
 from .crypto import sign_grant_payload
 from .time_authority import time_authority
 from .audit import audit_service
@@ -18,6 +18,207 @@ class AccessService:
     JIT Access Requests with Authority Verification, Multi-Signature Approvals,
     Delegation with Attenuation (D1–D10), and Recursive Cascade Revocation.
     """
+
+    @classmethod
+    def issue_grant(
+        cls,
+        issuer: Principal,
+        grantee_id: str,
+        vault_id: str,
+        actions: List[str],
+        valid_until: Any,
+        selector: Optional[Dict[str, Any]] = None,
+        delegable: bool = False,
+        purpose: str = "direct_grant"
+    ) -> Grant:
+        """
+        Issues an authoritative, Ed25519-signed Grant directly (§35, §36).
+        Enforces caller authority (vault owner, admin, or delegable grant holder),
+        canonicalizes grantee ID to user_id, normalizes RAG permissions,
+        updates resource manifest ACL for granular file-level grants,
+        and records tamper-evident audit log.
+        """
+        now = time_authority.now()
+        now_iso = now.isoformat()
+
+        if isinstance(valid_until, datetime):
+            valid_until_iso = valid_until.isoformat()
+        else:
+            valid_until_iso = str(valid_until)
+
+        # Normalize actions
+        clean_actions = []
+        raw_actions = actions or [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE]
+        for act in raw_actions:
+            c_act = act[7:] if act.startswith("action:") else act
+            if c_act == "read":
+                for standard_act in (ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE):
+                    if standard_act not in clean_actions:
+                        clean_actions.append(standard_act)
+            elif c_act not in clean_actions:
+                clean_actions.append(c_act)
+        if not clean_actions:
+            clean_actions = [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE]
+
+        sel = selector or {"all": True}
+        target_res_id = sel.get("resource_id") if isinstance(sel, dict) else None
+
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. Verify vault exists and caller authority
+            cursor.execute("SELECT * FROM vaults WHERE vault_id = ? OR slug = ?", (vault_id, vault_id))
+            vault_row = cursor.fetchone()
+            if not vault_row:
+                raise AccessServiceError(f"Vault '{vault_id}' not found.")
+
+            real_vault_id = vault_row["vault_id"]
+            vault_owner = (vault_row["owner_id"] or "").replace("user:", "").strip().lower()
+            p_clean = issuer.user_id.replace("user:", "").strip().lower()
+            p_uname = issuer.username.strip().lower()
+
+            is_owner = (p_clean == vault_owner or p_uname == vault_owner)
+            is_admin = any(r in issuer.roles for r in ("admin", "security_admin"))
+            is_steward = bool(vault_row["steward_role_id"] and vault_row["steward_role_id"] in issuer.roles)
+
+            if not (is_owner or is_admin or is_steward or DEMO_MODE):
+                # Check for active delegable grant
+                cursor.execute("""
+                    SELECT grant_id FROM grants
+                    WHERE vault_id = ? AND grantee_id IN (?, ?) AND state = 'active'
+                      AND delegable = 1 AND valid_from <= ? AND (valid_until IS NULL OR valid_until > ?)
+                """, (real_vault_id, f"user:{issuer.user_id}", issuer.user_id, now_iso, now_iso))
+                if not cursor.fetchone():
+                    raise AccessServiceError("Unauthorized: caller lacks authority to issue grants for this vault (ISSUER_UNAUTHORIZED).")
+
+            # 2. Resolve grantee identity and clearance
+            grantee_raw = grantee_id.strip()
+            if grantee_raw.startswith("role:"):
+                grantee_type = "role"
+                formatted_grantee = grantee_raw
+                grantee_clearance = 1
+                canonical_uid = grantee_raw.replace("role:", "")
+                canonical_uname = canonical_uid
+            else:
+                grantee_type = "user"
+                clean_grantee = grantee_raw.replace("user:", "").strip().lower()
+                cursor.execute("SELECT user_id, username, clearance FROM users WHERE LOWER(username) = ? OR LOWER(user_id) = ?", (clean_grantee, clean_grantee))
+                u_row = cursor.fetchone()
+                if u_row:
+                    canonical_uid = u_row["user_id"]
+                    canonical_uname = u_row["username"]
+                    grantee_clearance = u_row["clearance"]
+                    formatted_grantee = f"user:{canonical_uid}"
+                else:
+                    canonical_uid = clean_grantee
+                    canonical_uname = clean_grantee
+                    grantee_clearance = 1
+                    formatted_grantee = f"user:{clean_grantee}"
+
+            # 3. Supersede old active grants for same vault, grantee, and target resource
+            if target_res_id:
+                cursor.execute("""
+                    UPDATE grants
+                    SET state = 'superseded', revoked_at = ?, revoked_by = ?, revoke_reason = 'Superseded by new grant'
+                    WHERE vault_id = ? AND grantee_id IN (?, ?, ?, ?) AND state = 'active'
+                      AND selector LIKE ?
+                """, (now_iso, issuer.user_id, real_vault_id, formatted_grantee, canonical_uid, f"user:{canonical_uname}", canonical_uname, f'%{target_res_id}%'))
+
+            # 4. Create and cryptographically sign new Grant
+            grant_id = f"g_dir_{uuid4().hex[:8]}"
+            grant_dict = {
+                "grant_id": grant_id,
+                "vault_id": real_vault_id,
+                "grantee_type": grantee_type,
+                "grantee_id": formatted_grantee,
+                "selector": sel,
+                "actions": clean_actions,
+                "valid_from": now_iso,
+                "valid_until": valid_until_iso,
+                "purpose": purpose,
+                "delegable": bool(delegable),
+                "depth": 1 if delegable else 0,
+                "parent_grant_id": None,
+                "issuer_id": issuer.user_id
+            }
+
+            sig = sign_grant_payload(grant_dict)
+
+            cursor.execute("""
+                INSERT INTO grants (
+                    grant_id, vault_id, grantee_type, grantee_id, selector, actions,
+                    valid_from, valid_until, purpose, delegable, depth, parent_grant_id,
+                    issuer_id, state, signature, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 'active', ?, ?)
+            """, (
+                grant_id, real_vault_id, grantee_type, formatted_grantee,
+                json.dumps(sel), json.dumps(clean_actions),
+                now_iso, valid_until_iso, purpose,
+                1 if delegable else 0, 1 if delegable else 0,
+                issuer.user_id, sig, now_iso
+            ))
+
+            cursor.execute("INSERT OR IGNORE INTO grant_usage (grant_id, queries, evidence, bytes) VALUES (?, 0, 0, 0)", (grant_id,))
+
+            # 5. For file-specific grant, update resource manifest ACL
+            if target_res_id:
+                cursor.execute("SELECT allowed_users, allowed_roles, min_clearance FROM resource_manifests WHERE resource_id = ?", (target_res_id,))
+                m_row = cursor.fetchone()
+                if m_row:
+                    if grantee_type == "user":
+                        users_list = json.loads(m_row["allowed_users"] or "[]")
+                        for candidate_u in (canonical_uid, canonical_uname, formatted_grantee, f"user:{canonical_uid}"):
+                            if candidate_u not in users_list:
+                                users_list.append(candidate_u)
+                        new_min = m_row["min_clearance"]
+                        if grantee_clearance < new_min:
+                            new_min = grantee_clearance
+                        cursor.execute("""
+                            UPDATE resource_manifests
+                            SET allowed_users = ?, min_clearance = ?, acl_version = acl_version + 1
+                            WHERE resource_id = ?
+                        """, (json.dumps(users_list), new_min, target_res_id))
+                    else:
+                        roles_list = json.loads(m_row["allowed_roles"] or "[]")
+                        if canonical_uid not in roles_list:
+                            roles_list.append(canonical_uid)
+                        cursor.execute("""
+                            UPDATE resource_manifests
+                            SET allowed_roles = ?, acl_version = acl_version + 1
+                            WHERE resource_id = ?
+                        """, (json.dumps(roles_list), target_res_id))
+
+            cursor.execute("UPDATE vaults SET vault_epoch = vault_epoch + 1 WHERE vault_id = ?", (real_vault_id,))
+            conn.commit()
+
+        audit_service.log_event(
+            request_id=f"dir_{grant_id}",
+            actor_id=issuer.user_id,
+            action="grant_issued",
+            object_type="resource" if target_res_id else "vault",
+            object_id=target_res_id or real_vault_id,
+            decision="ALLOW",
+            policy_version=1,
+            reason_code="RESOURCE_GRANTED" if target_res_id else "FOLDER_GRANTED"
+        )
+
+        return Grant(
+            grant_id=grant_id,
+            vault_id=real_vault_id,
+            grantee_type=grantee_type,
+            grantee_id=formatted_grantee,
+            selector=sel,
+            actions=clean_actions,
+            valid_from=now_iso,
+            valid_until=valid_until_iso,
+            purpose=purpose,
+            delegable=bool(delegable),
+            depth=1 if delegable else 0,
+            issuer_id=issuer.user_id,
+            state="active",
+            signature=sig,
+            created_at=now_iso
+        )
 
     @classmethod
     def create_access_request(

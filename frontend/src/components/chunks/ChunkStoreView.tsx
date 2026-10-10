@@ -42,6 +42,8 @@ import {
   DialogDescription,
 } from "../ui/dialog"
 import { toast } from "sonner"
+import { AuthenticatedMedia } from "../media/AuthenticatedMedia"
+import { ResourceInspectorLayout } from "../common/ResourceInspectorLayout"
 
 export const ChunkStoreView: React.FC = () => {
   const { vaults, startNewChat, persona, principal } = useApp()
@@ -476,21 +478,13 @@ export const ChunkStoreView: React.FC = () => {
                       {/* Media Link if applicable */}
                       {chunk.media_url && (
                         <div className="mt-2.5">
-                          {chunk.modality === "image" ? (
-                            <div className="relative group/img overflow-hidden rounded-lg border border-border max-h-36 bg-black/40">
-                              <img
-                                src={chunk.media_url}
-                                alt={chunk.resource_title}
-                                className="w-full h-36 object-contain hover:scale-105 transition-transform"
-                              />
-                            </div>
-                          ) : chunk.modality === "audio" ? (
-                            <audio
-                              controls
-                              src={chunk.media_url}
-                              className="w-full h-8 mt-1 rounded bg-surface"
-                            />
-                          ) : null}
+                          <AuthenticatedMedia
+                            mediaUrl={chunk.media_url}
+                            alt={chunk.resource_title}
+                            modality={chunk.modality}
+                            className="max-h-40"
+                            allowZoom={false}
+                          />
                         </div>
                       )}
                     </div>
@@ -536,157 +530,147 @@ export const ChunkStoreView: React.FC = () => {
         )}
       </div>
 
-      {/* INSPECT CHUNK DETAIL MODAL */}
-      <Dialog open={!!inspectChunk} onOpenChange={(open) => !open && setInspectChunk(null)}>
-        <DialogContent className="max-w-2xl bg-surface-raised border border-border text-foreground shadow-2xl p-6 max-h-[85vh] flex flex-col">
-          {inspectChunk && (
+      {/* INSPECT CHUNK DETAIL MODAL WITH TWO-PANE LAYOUT */}
+      {inspectChunk && (
+        <ResourceInspectorLayout
+          open={!!inspectChunk}
+          onClose={() => setInspectChunk(null)}
+          title="Canonical Chunk Inspector"
+          subtitle={`${inspectChunk.chunk_id} · ${inspectChunk.resource_title}`}
+          icon={<Glyph name="storage" size={16} />}
+          badge={<Strata level={inspectChunk.classification} size="sm" />}
+          leftPane={
             <>
-              <DialogHeader className="pb-3 border-b border-border/40 shrink-0">
+              {/* Media Preview if present */}
+              {inspectChunk.media_url && (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-foreground flex items-center justify-between">
+                    <span>Attached Canonical Media:</span>
+                    <span className="text-[10px] text-muted-foreground font-mono uppercase">
+                      Modality: {inspectChunk.modality}
+                    </span>
+                  </div>
+                  <AuthenticatedMedia
+                    mediaUrl={inspectChunk.media_url}
+                    alt={inspectChunk.resource_title}
+                    modality={inspectChunk.modality}
+                    allowZoom={true}
+                    showMeta={true}
+                  />
+                </div>
+              )}
+
+              {/* Decrypted Canonical Plaintext */}
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="h-8 w-8 rounded-lg bg-surface border border-border flex items-center justify-center text-foreground">
-                      <Glyph name="storage" size={16} />
-                    </div>
-                    <div>
-                      <DialogTitle className="text-base font-semibold">
-                        Canonical Chunk Inspector
-                      </DialogTitle>
-                      <DialogDescription className="text-xs text-muted-foreground font-mono">
-                        {inspectChunk.chunk_id} · {inspectChunk.resource_title}
-                      </DialogDescription>
-                    </div>
-                  </div>
-                  <Strata level={inspectChunk.classification} size="sm" />
-                </div>
-              </DialogHeader>
-
-              <ScrollArea className="flex-1 pr-3 py-2 space-y-4">
-                {/* Cryptographic Badges */}
-                <div className="flex items-center gap-2 flex-wrap pt-2">
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground bg-surface flex items-center gap-1">
-                    <Lock className="h-3 w-3 text-trust" />
-                    AES-256-GCM Hardware Encrypted
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-trust/30 text-trust bg-trust/10 flex items-center gap-1">
-                    <Seal state="verified" size={12} />
-                    SHA-256 Verified
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground bg-surface uppercase">
-                    Modality: {inspectChunk.modality}
-                  </span>
-                </div>
-
-                {/* Media Preview if present */}
-                {inspectChunk.media_url && (
-                  <div className="p-3 rounded-lg border border-border bg-surface space-y-2">
-                    <div className="text-xs font-semibold text-foreground">Attached Canonical Media:</div>
-                    {inspectChunk.modality === "image" ? (
-                      <div className="rounded-lg overflow-hidden border border-border bg-black/60 max-h-72 flex items-center justify-center">
-                        <img
-                          src={inspectChunk.media_url}
-                          alt="Canonical asset"
-                          className="max-h-72 object-contain"
-                        />
-                      </div>
-                    ) : inspectChunk.modality === "audio" ? (
-                      <audio controls src={inspectChunk.media_url} className="w-full rounded" />
-                    ) : null}
-                  </div>
-                )}
-
-                {/* Decrypted Canonical Plaintext */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-foreground">
-                      Decrypted Plaintext Content:
-                    </label>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => copyToClipboard(inspectChunk.content, "Decrypted Content")}
-                      className="text-xs h-6 gap-1 px-2 text-foreground hover:bg-surface"
-                    >
-                      {copiedField === "Decrypted Content" ? (
-                        <Check className="h-3 w-3 text-trust" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                      <span>Copy</span>
-                    </Button>
-                  </div>
-                  <div className="p-3 rounded-lg bg-surface border border-border font-mono text-xs text-foreground/90 leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap select-text">
-                    {inspectChunk.content}
-                  </div>
-                </div>
-
-                {/* Metadata Table */}
-                <div className="space-y-2 pt-2">
                   <label className="text-xs font-semibold text-foreground">
-                    Cryptographic & Provenance Details:
+                    Decrypted Plaintext Content:
                   </label>
-                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                    <div className="p-2.5 rounded-lg bg-surface border border-border">
-                      <div className="text-[10px] text-muted-foreground uppercase">Chunk Index</div>
-                      <div className="font-semibold text-foreground mt-0.5 tabular-nums">
-                        #{inspectChunk.chunk_index}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface border border-border">
-                      <div className="text-[10px] text-muted-foreground uppercase">Locator / Span</div>
-                      <div className="font-semibold text-foreground mt-0.5">
-                        {inspectChunk.locator}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface border border-border col-span-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase">Content SHA-256 Hash</span>
-                        <Identicon hash={inspectChunk.content_hash} size={14} />
-                      </div>
-                      <div className="text-[11px] font-semibold text-trust mt-1 break-all select-all">
-                        {inspectChunk.content_hash}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface border border-border">
-                      <div className="text-[10px] text-muted-foreground uppercase">Resource ID</div>
-                      <div className="font-semibold text-foreground mt-0.5 truncate">
-                        {inspectChunk.resource_id}
-                      </div>
-                    </div>
-                    <div className="p-2.5 rounded-lg bg-surface border border-border">
-                      <div className="text-[10px] text-muted-foreground uppercase">Vault Compartment</div>
-                      <div className="font-semibold text-foreground mt-0.5 truncate">
-                        {inspectChunk.vault_name} ({inspectChunk.vault_slug})
-                      </div>
-                    </div>
-                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => copyToClipboard(inspectChunk.content, "Decrypted Content")}
+                    className="text-xs h-6 gap-1 px-2 text-foreground hover:bg-surface"
+                  >
+                    {copiedField === "Decrypted Content" ? (
+                      <Check className="h-3 w-3 text-trust" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                    <span>Copy</span>
+                  </Button>
                 </div>
-              </ScrollArea>
-
-              <div className="pt-3 border-t border-border/40 flex items-center justify-between shrink-0">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setInspectChunk(null)}
-                  className="text-xs h-8 border-border"
-                >
-                  Close
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    handleAskChunk(inspectChunk)
-                    setInspectChunk(null)
-                  }}
-                  className="text-xs h-8 gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium"
-                >
-                  <MessageSquare className="h-3.5 w-3.5" />
-                  <span>Start Chat With This File</span>
-                </Button>
+                <div className="p-3.5 rounded-lg bg-surface border border-border font-mono text-xs text-foreground/90 leading-relaxed max-h-80 overflow-y-auto whitespace-pre-wrap select-text">
+                  {inspectChunk.content}
+                </div>
               </div>
             </>
-          )}
-        </DialogContent>
-      </Dialog>
+          }
+          rightPane={
+            <>
+              {/* Cryptographic Badges */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground bg-surface flex items-center gap-1">
+                  <Lock className="h-3 w-3 text-trust" />
+                  AES-256-GCM Hardware Encrypted
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-trust/30 text-trust bg-trust/10 flex items-center gap-1">
+                  <Seal state="verified" size={12} />
+                  SHA-256 Verified
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground bg-surface uppercase">
+                  Modality: {inspectChunk.modality}
+                </span>
+              </div>
+
+              {/* Metadata Table */}
+              <div className="space-y-2 pt-2">
+                <label className="text-xs font-semibold text-foreground">
+                  Cryptographic & Provenance Details:
+                </label>
+                <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="p-2.5 rounded-lg bg-surface border border-border">
+                    <div className="text-[10px] text-muted-foreground uppercase">Chunk Index</div>
+                    <div className="font-semibold text-foreground mt-0.5 tabular-nums">
+                      #{inspectChunk.chunk_index}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-surface border border-border">
+                    <div className="text-[10px] text-muted-foreground uppercase">Locator / Span</div>
+                    <div className="font-semibold text-foreground mt-0.5">
+                      {inspectChunk.locator}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-surface border border-border col-span-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-muted-foreground uppercase">Content SHA-256 Hash</span>
+                      <Identicon hash={inspectChunk.content_hash} size={14} />
+                    </div>
+                    <div className="text-[11px] font-semibold text-trust mt-1 break-all select-all">
+                      {inspectChunk.content_hash}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-surface border border-border">
+                    <div className="text-[10px] text-muted-foreground uppercase">Resource ID</div>
+                    <div className="font-semibold text-foreground mt-0.5 truncate">
+                      {inspectChunk.resource_id}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-surface border border-border">
+                    <div className="text-[10px] text-muted-foreground uppercase">Vault Compartment</div>
+                    <div className="font-semibold text-foreground mt-0.5 truncate">
+                      {inspectChunk.vault_name} ({inspectChunk.vault_slug})
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          }
+          footerActions={
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setInspectChunk(null)}
+                className="text-xs h-8 border-border"
+              >
+                Close
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  handleAskChunk(inspectChunk)
+                  setInspectChunk(null)
+                }}
+                className="text-xs h-8 gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium"
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                <span>Start Chat With This File</span>
+              </Button>
+            </>
+          }
+        />
+      )}
     </div>
   )
 }

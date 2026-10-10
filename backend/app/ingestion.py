@@ -72,6 +72,7 @@ class MultiModalIngestion:
         allowed_groups: Optional[List[str]] = None,
         denied_roles: Optional[List[str]] = None,
         denied_users: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None,
     ) -> str:
         """
         Ingests multi-modal document with encrypted canonical storage and monotonic security labels.
@@ -92,15 +93,17 @@ class MultiModalIngestion:
             v_row = cursor.fetchone()
             tenant_id = v_row["tenant_id"] if v_row else "tenant_primary"
 
-            # 1. Insert Resource
+            # 1. Insert Resource with owner_user_id
+            clean_ou = owner_user_id.replace("user:", "").strip().lower() if owner_user_id else None
             cursor.execute("""
             INSERT INTO resources (
-                resource_id, vault_id, tenant_id, resource_type, title,
+                resource_id, vault_id, tenant_id, resource_type, title, owner_user_id,
                 classification, current_version, acl_version, content_hash, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, 'active', ?)
-            """, (resource_id, vault_id, tenant_id, resource_type, title, default_classification, content_hash, now_iso))
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'active', ?)
+            """, (resource_id, vault_id, tenant_id, resource_type, title, clean_ou, default_classification, content_hash, now_iso))
 
-            # 2. Insert Resource Manifest
+            # 2. Insert Resource Manifest with owner in allowed_users
+            initial_allowed_users = [clean_ou, f"user:{clean_ou}"] if clean_ou else []
             cursor.execute("""
             INSERT INTO resource_manifests (
                 resource_id, vault_id, tenant_id, classification,
@@ -112,7 +115,7 @@ class MultiModalIngestion:
                 resource_id, vault_id, tenant_id, default_classification,
                 json.dumps(allowed_roles or ["role:analyst", "role:viewer"]),
                 json.dumps(allowed_groups or []),
-                json.dumps([]),
+                json.dumps(initial_allowed_users),
                 json.dumps(denied_users or []),
                 json.dumps(denied_roles or []),
                 default_min_clearance,
@@ -132,7 +135,11 @@ class MultiModalIngestion:
                     chunk_classification = 4  # CREDENTIAL
 
                 chunk_min_clearance = max(sec.get("min_clearance", default_min_clearance), default_min_clearance)
-                chunk_acl = sec.get("acl_selector", allowed_roles or ["role:analyst"])
+                chunk_acl = list(sec.get("acl_selector", allowed_roles or ["role:analyst", "role:viewer"]))
+                if clean_ou:
+                    for ou_tag in (clean_ou, f"user:{clean_ou}"):
+                        if ou_tag not in chunk_acl:
+                            chunk_acl.append(ou_tag)
                 chunk_deny = sec.get("deny_selector", denied_roles or [])
 
                 provenance = {
@@ -206,7 +213,8 @@ class MultiModalIngestion:
         pdf_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """Parses real PDF using pypdf, extracts text per page, and ingests with provenance."""
         import pypdf
@@ -246,7 +254,8 @@ class MultiModalIngestion:
             pages_or_sections=pages_data,
             default_classification=classification,
             default_min_clearance=min_clearance,
-            allowed_roles=allowed_roles
+            allowed_roles=allowed_roles,
+            owner_user_id=owner_user_id
         )
 
     @classmethod
@@ -257,7 +266,8 @@ class MultiModalIngestion:
         docx_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """Parses DOCX document paragraphs, headers, and tables."""
         cls.validate_upload(filename, docx_bytes)
@@ -337,7 +347,8 @@ class MultiModalIngestion:
                 pages_or_sections=sections,
                 default_classification=classification,
                 default_min_clearance=min_clearance,
-                allowed_roles=allowed_roles
+                allowed_roles=allowed_roles,
+                owner_user_id=owner_user_id
             )
         except Exception as e:
             raise IngestionQuarantineError(f"Failed to process Word document {filename}: {e}")
@@ -350,7 +361,8 @@ class MultiModalIngestion:
         text_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """Ingests structured code, scripts, or plain text with logical line chunking."""
         cls.validate_upload(filename, text_bytes)
@@ -408,7 +420,8 @@ class MultiModalIngestion:
             pages_or_sections=sections,
             default_classification=classification,
             default_min_clearance=min_clearance,
-            allowed_roles=allowed_roles
+            allowed_roles=allowed_roles,
+            owner_user_id=owner_user_id
         )
 
     @classmethod
@@ -419,7 +432,8 @@ class MultiModalIngestion:
         image_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """
         Parses image using Deep Multimodal Vision (Qwen-VL) + OCR,
@@ -463,7 +477,8 @@ class MultiModalIngestion:
             pages_or_sections=sections,
             default_classification=classification,
             default_min_clearance=min_clearance,
-            allowed_roles=allowed_roles
+            allowed_roles=allowed_roles,
+            owner_user_id=owner_user_id
         )
 
     @classmethod
@@ -474,7 +489,8 @@ class MultiModalIngestion:
         video_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """
         Parses video files using OpenCV keyframe extraction & scene OCR.
@@ -602,7 +618,8 @@ class MultiModalIngestion:
             pages_or_sections=sections,
             default_classification=classification,
             default_min_clearance=min_clearance,
-            allowed_roles=allowed_roles
+            allowed_roles=allowed_roles,
+            owner_user_id=owner_user_id
         )
 
     @classmethod
@@ -613,7 +630,8 @@ class MultiModalIngestion:
         audio_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """
         Parses audio recordings using local faster-whisper speech recognition,
@@ -673,7 +691,8 @@ class MultiModalIngestion:
             pages_or_sections=sections,
             default_classification=classification,
             default_min_clearance=min_clearance,
-            allowed_roles=allowed_roles
+            allowed_roles=allowed_roles,
+            owner_user_id=owner_user_id
         )
 
     @classmethod
@@ -684,7 +703,8 @@ class MultiModalIngestion:
         file_bytes: bytes,
         classification: int = 1,
         min_clearance: int = 1,
-        allowed_roles: Optional[List[str]] = None
+        allowed_roles: Optional[List[str]] = None,
+        owner_user_id: Optional[str] = None
     ) -> str:
         """
         Universal Multimodal Router:
@@ -692,17 +712,17 @@ class MultiModalIngestion:
         """
         ext = Path(filename).suffix.lower()
         if ext == ".pdf":
-            return cls.ingest_raw_pdf(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles)
+            return cls.ingest_raw_pdf(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles, owner_user_id=owner_user_id)
         elif ext == ".docx":
-            return cls.ingest_raw_docx(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles)
+            return cls.ingest_raw_docx(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles, owner_user_id=owner_user_id)
         elif ext in cls.IMAGE_EXTS:
-            return cls.ingest_raw_image(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles)
+            return cls.ingest_raw_image(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles, owner_user_id=owner_user_id)
         elif ext in cls.VIDEO_EXTS:
-            return cls.ingest_raw_video(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles)
+            return cls.ingest_raw_video(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles, owner_user_id=owner_user_id)
         elif ext in cls.AUDIO_EXTS:
-            return cls.ingest_raw_audio(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles)
+            return cls.ingest_raw_audio(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles, owner_user_id=owner_user_id)
         elif ext in cls.DOC_EXTS:
-            return cls.ingest_raw_code_or_text(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles)
+            return cls.ingest_raw_code_or_text(vault_id, filename, file_bytes, classification, min_clearance, allowed_roles, owner_user_id=owner_user_id)
         else:
             raise IngestionQuarantineError(f"Unsupported file format '{ext}' in multimodal pipeline.")
 

@@ -108,7 +108,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ onRequestAccess }) => {
         purpose,
         effectiveFileId,
         undefined,
-        effectiveMode
+        effectiveMode,
+        conv.id
       )
 
       const assistantMessage: Message = {
@@ -124,7 +125,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ onRequestAccess }) => {
         vaultSlug: selectedVault.slug,
         selectedFileId: effectiveFileId,
         selectedFileName: effectiveFileName,
-        retrievalMode: response.retrieval_mode || effectiveMode,
+        retrievalMode: response.effective_retrieval_mode || response.retrieval_mode || effectiveMode,
       }
 
       conv = {
@@ -136,6 +137,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ onRequestAccess }) => {
       saveConversation(conv)
     } catch (error) {
       const err = error as ApiError
+      const isSecurityRefusal = err.status === 403 || err.code === "SCOPE_ISOLATION_VIOLATION" || err.code === "CLASSIFICATION_EXCEEDED" || err.code === "CLEARANCE_INSUFFICIENT"
       const errorMessage: Message = {
         id: `msg_${Date.now()}_err`,
         role: "assistant",
@@ -143,8 +145,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ onRequestAccess }) => {
           err.message ||
           "Failed to process query through the local security pipeline.",
         createdAt: new Date().toISOString(),
-        mode: "REFUSAL",
-        refusalReason: err.code || "REQUEST_FAILED",
+        mode: isSecurityRefusal ? "REFUSAL" : undefined,
+        refusalReason: isSecurityRefusal ? (err.code || "UNAUTHORIZED_SCOPE") : undefined,
         vaultSlug: selectedVault.slug,
         selectedFileId: effectiveFileId,
         selectedFileName: effectiveFileName,

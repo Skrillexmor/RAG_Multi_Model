@@ -409,7 +409,61 @@ class Database:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_structured_records_lookup ON structured_records(vault_id, table_name, classification);")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_events_lookup ON audit_events(request_id, actor_id);")
 
+            # 10. Authoritative Persistent Conversations, Messages & Isolated Memory (§Task C, §Task G)
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                conversation_id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                owner_user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                vault_slug TEXT NOT NULL DEFAULT '',
+                selected_file_id TEXT,
+                selected_file_name TEXT,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+            );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversations_owner ON conversations(owner_user_id, tenant_id);")
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_messages (
+                message_id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                owner_user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                retrieval_mode TEXT,
+                citations_json TEXT,
+                evidence_items_json TEXT,
+                security_trace_json TEXT,
+                status TEXT,
+                vault_slug TEXT,
+                selected_file_id TEXT,
+                selected_file_name TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+                FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+            );
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_conv_messages_conv ON conversation_messages(conversation_id, created_at);")
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS conversation_summaries (
+                conversation_id TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                entities_json TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+                FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+            );
+            """)
+
             conn.commit()
+
 
     def revoke_grant_cascade(self, root_grant_id: str, revoker_id: str, reason: str) -> List[str]:
         """

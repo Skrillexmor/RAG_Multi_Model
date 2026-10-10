@@ -59,7 +59,7 @@ import { api } from "../../lib/api"
 import { toast } from "sonner"
 
 export const SourcesView: React.FC = () => {
-  const { vaults, setSelectedVault, startNewChat, refreshVaults } = useApp()
+  const { vaults, setSelectedVault, startNewChat, refreshVaults, principal, persona } = useApp()
   const [search, setSearch] = useState("")
   const [selectedUploadVault, setSelectedUploadVault] = useState<string | null>(null)
   const [modalityFilter, setModalityFilter] = useState<"ALL" | "DOC" | "IMAGE" | "AUDIO" | "VIDEO" | "CODE">("ALL")
@@ -568,7 +568,22 @@ export const SourcesView: React.FC = () => {
                                       <span className="text-xs font-medium text-foreground truncate">
                                         {doc.title}
                                       </span>
-                                      <Strata level={doc.classification} size="sm" />
+                                      {(() => {
+                                        const pUid = principal?.user_id?.replace("user:", "")?.toLowerCase()
+                                        const pUname = principal?.username?.toLowerCase()
+                                        const perUname = persona?.username?.toLowerCase()
+                                        const vOwner = vault.owner_id?.replace("user:", "")?.toLowerCase()
+                                        const docOwner = doc.owner_user_id?.replace("user:", "")?.toLowerCase()
+
+                                        const isSelfOwned = Boolean(
+                                          (docOwner && (docOwner === pUid || docOwner === pUname || docOwner === perUname)) ||
+                                          (vOwner && (vOwner === pUid || vOwner === pUname || vOwner === perUname))
+                                        )
+
+                                        return !isSelfOwned ? (
+                                          <Strata level={doc.classification} size="sm" />
+                                        ) : null
+                                      })()}
                                       <span className="text-[9px] font-mono px-1 py-0.2 rounded border uppercase font-medium border-border/60 text-muted-foreground bg-secondary">
                                         {isImage
                                           ? "IMAGE OCR"

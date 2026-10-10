@@ -29,6 +29,7 @@ export interface VaultDocument {
   status: string
   chunks_count: number
   created_at: string
+  owner_user_id?: string
 }
 
 export interface Vault {
@@ -162,6 +163,9 @@ export interface RetrievalSecurityTrace {
   principal: string
   vault: string
   retrieval_mode?: RetrievalMode
+  effective_retrieval_mode?: RetrievalMode
+  elapsed_seconds?: number
+  conversation_id?: string
   gate_a: {
     compiled_filter_valid: boolean
     candidates_count: number
@@ -188,6 +192,23 @@ export interface RagQueryResponse {
   security_trace?: RetrievalSecurityTrace
   lease_deadline?: string
   retrieval_mode?: RetrievalMode
+  effective_retrieval_mode?: RetrievalMode
+  elapsed_seconds?: number
+  conversation_id?: string
+}
+
+export interface AuthConfig {
+  app_name: string
+  demo_mode: boolean
+  offline_mode: boolean
+  inactivity_timeout_seconds: number
+  clock_status: string
+}
+
+export interface MediaTicketResponse {
+  ticket: string
+  expires_in_seconds: number
+  media_url: string
 }
 
 export interface AuditEvent {
@@ -305,6 +326,12 @@ export interface Conversation {
   pinned?: boolean
   selectedFileId?: string
   selectedFileName?: string
+  tenant_id?: string
+  owner_user_id?: string
+  memory?: {
+    rolling_summary?: string
+    recent_turns?: Array<{ role: string; content: string }>
+  }
 }
 
 export interface UserSummary {

@@ -19,6 +19,7 @@ import { Badge } from "../ui/badge"
 import { Seal } from "../ui/seal"
 import { Identicon } from "../ui/identicon"
 import { Strata } from "../ui/strata"
+import { AuthenticatedMedia } from "../media/AuthenticatedMedia"
 
 interface EvidenceInspectorProps {
   evidence: EvidenceItem | null
@@ -130,13 +131,12 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
                   Qwen 2.5-VL 3B
                 </span>
               </div>
-              <div className="rounded-xl overflow-hidden border border-border bg-black/40 p-2">
-                <img
-                  src={mediaUrl}
-                  alt="Visual evidence"
-                  className="max-h-56 mx-auto rounded-lg object-contain shadow-xs"
-                />
-              </div>
+              <AuthenticatedMedia
+                mediaUrl={mediaUrl}
+                alt="Visual evidence"
+                modality="image"
+                allowZoom={true}
+              />
             </div>
           )}
 
@@ -145,22 +145,27 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
               <div className="font-medium text-foreground text-xs flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-foreground">
                   <Reel size={14} className="text-muted-foreground" />
-                  <span>Video Keyframe {timestamp ? `[${timestamp}]` : ""}</span>
+                  <span>Video Evidence {timestamp ? `[${timestamp}]` : ""}</span>
                 </span>
                 <span className="text-[10px] text-muted-foreground font-mono">
                   OpenCV Keyframe
                 </span>
               </div>
-              <div className="rounded-xl overflow-hidden border border-border bg-black/40 p-2 space-y-2">
+              <div className="space-y-2">
                 {keyframeUrl && (
-                  <img
-                    src={keyframeUrl}
+                  <AuthenticatedMedia
+                    mediaUrl={keyframeUrl}
                     alt="Video keyframe"
-                    className="max-h-52 mx-auto rounded-lg object-contain shadow-xs"
+                    modality="image"
+                    allowZoom={true}
                   />
                 )}
                 {mediaUrl && (
-                  <video src={mediaUrl} controls className="w-full rounded-lg" />
+                  <AuthenticatedMedia
+                    mediaUrl={mediaUrl}
+                    alt="Video stream"
+                    modality="video"
+                  />
                 )}
               </div>
             </div>
@@ -177,9 +182,11 @@ export const EvidenceInspector: React.FC<EvidenceInspectorProps> = ({
                   AES-256 Storage
                 </span>
               </div>
-              <div className="p-3 rounded-xl border border-border bg-surface">
-                <audio controls src={mediaUrl} className="w-full h-8" />
-              </div>
+              <AuthenticatedMedia
+                mediaUrl={mediaUrl}
+                alt="Audio segment"
+                modality="audio"
+              />
             </div>
           )}
 

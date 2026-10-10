@@ -19,6 +19,9 @@ import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
 import { Strata } from "../ui/strata"
 import { cn } from "../../lib/utils"
+import { AuthenticatedMedia } from "../media/AuthenticatedMedia"
+import { Popover, PopoverTrigger, PopoverContent } from "../ui/popover"
+import { Info, Gauge, CheckCircle2 } from "lucide-react"
 
 interface MessageItemProps {
   message: Message
@@ -274,20 +277,26 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                     {/* Multimodal Preview Thumbnail / Glyph */}
                     {isImage && mediaUrl ? (
                       <div className="h-12 w-12 rounded-lg overflow-hidden border border-border shrink-0 bg-black/40">
-                        <img
-                          src={mediaUrl}
+                        <AuthenticatedMedia
+                          mediaUrl={mediaUrl}
                           alt="Evidence thumbnail"
-                          className="h-full w-full object-cover"
+                          modality="image"
+                          className="h-full w-full"
+                          imageClassName="h-full w-full object-cover"
+                          allowZoom={false}
                         />
                       </div>
                     ) : isVideo && keyframeUrl ? (
                       <div className="relative h-12 w-16 rounded-lg overflow-hidden border border-border shrink-0 bg-black/40">
-                        <img
-                          src={keyframeUrl}
+                        <AuthenticatedMedia
+                          mediaUrl={keyframeUrl}
                           alt="Video keyframe"
-                          className="h-full w-full object-cover"
+                          modality="image"
+                          className="h-full w-full"
+                          imageClassName="h-full w-full object-cover"
+                          allowZoom={false}
                         />
-                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center pointer-events-none">
                           <Play size={14} className="text-white fill-white/80" />
                         </div>
                       </div>
@@ -335,22 +344,109 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
 
-        {/* Security Summary Component (§6.5) */}
+        {/* Security Summary & Run Details Component */}
         {message.securityTrace && (
           <div className="pt-1.5 flex items-center justify-between text-[11px] text-muted-foreground flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => openTraceInspector(message.securityTrace!)}
-              className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors group cursor-pointer"
-            >
-              <Verify size={13} className="text-trust" />
-              <span>Gate Path:</span>
-              <span className="font-mono text-foreground font-medium">
-                Gate A ({message.securityTrace.gate_a?.candidates_count ?? 0}) ▸ Gate B (
-                {message.securityTrace.gate_b?.authorized_count ?? 0})
-              </span>
-              <span className="text-muted-foreground">· Click to inspect trace</span>
-            </button>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => openTraceInspector(message.securityTrace!)}
+                className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors group cursor-pointer"
+              >
+                <Verify size={13} className="text-trust" />
+                <span>Gate Path:</span>
+                <span className="font-mono text-foreground font-medium">
+                  Gate A ({message.securityTrace.gate_a?.candidates_count ?? 0}) ▸ Gate B (
+                  {message.securityTrace.gate_b?.authorized_count ?? 0})
+                </span>
+                <span className="text-muted-foreground">· Inspect trace</span>
+              </button>
+
+              {/* Per-Answer Run Details Popover */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-secondary/80 hover:bg-secondary text-foreground text-[10px] font-mono border border-border/60 transition-colors"
+                  >
+                    <Info className="h-3 w-3 text-primary" />
+                    <span>Run details</span>
+                    {typeof message.securityTrace.elapsed_seconds === "number" && (
+                      <span className="text-muted-foreground">
+                        ({message.securityTrace.elapsed_seconds.toFixed(2)}s)
+                      </span>
+                    )}
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 p-3 space-y-2.5 text-xs bg-surface-raised border border-border shadow-xl">
+                  <div className="font-semibold text-foreground flex items-center justify-between border-b border-border/40 pb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <Gauge className="h-3.5 w-3.5 text-primary" />
+                      Execution Run Details
+                    </span>
+                    <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                      {message.securityTrace.effective_retrieval_mode || message.retrievalMode || "LOW"}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1.5 text-[11px] font-mono">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Requested Mode:</span>
+                      <span className="text-foreground font-semibold">{message.retrievalMode || "LOW"}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Effective Mode:</span>
+                      <span className="text-foreground font-semibold">
+                        {message.securityTrace.effective_retrieval_mode || message.securityTrace.retrieval_mode || message.retrievalMode || "LOW"}
+                      </span>
+                    </div>
+                    {typeof message.securityTrace.elapsed_seconds === "number" && (
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>Elapsed Time:</span>
+                        <span className="text-foreground font-semibold">
+                          {message.securityTrace.elapsed_seconds.toFixed(2)} s
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Vault Scope:</span>
+                      <span className="text-foreground truncate max-w-[150px]">
+                        {message.vaultSlug || "default"}
+                      </span>
+                    </div>
+                    {message.selectedFileName && (
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>File Scope:</span>
+                        <span className="text-foreground truncate max-w-[150px]">
+                          {message.selectedFileName}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Gate A Candidates:</span>
+                      <span className="text-foreground font-semibold">
+                        {message.securityTrace.gate_a?.candidates_count ?? 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Gate B Authorized:</span>
+                      <span className="text-foreground font-semibold">
+                        {message.securityTrace.gate_b?.authorized_count ?? 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Verified Citations:</span>
+                      <span className="text-foreground font-semibold">
+                        {message.citations?.length || message.securityTrace.grounding?.citations_count || 0}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="pt-1.5 border-t border-border/40 text-[10px] text-muted-foreground font-mono flex items-center gap-1">
+                    <CheckCircle2 className="h-3 w-3 text-trust" />
+                    <span>Mode locked and executed deterministically</span>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
 
             <div className="flex items-center gap-2">
               {(message.securityTrace as any)?.lease_deadline && (

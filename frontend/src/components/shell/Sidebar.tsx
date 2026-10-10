@@ -174,7 +174,7 @@ export const Sidebar: React.FC = () => {
       <div
         key={conv.id}
         className={cn(
-          "group relative flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors mb-1 cursor-pointer",
+          "group relative flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors mb-1 cursor-pointer gap-1.5",
           isActive
             ? "bg-secondary text-foreground font-medium border-l-2 border-beam pl-2 shadow-xs"
             : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
@@ -183,7 +183,7 @@ export const Sidebar: React.FC = () => {
           if (!isEditing) selectConversation(conv.id)
         }}
       >
-        <div className="flex items-center gap-2 min-w-0 flex-1 mr-1">
+        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden mr-1">
           <div
             className={cn(
               "w-5 h-5 rounded flex items-center justify-center shrink-0",
@@ -213,47 +213,56 @@ export const Sidebar: React.FC = () => {
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span className="truncate text-xs select-none">{conv.title}</span>
+            <span className="truncate text-xs select-none block min-w-0">{conv.title}</span>
           )}
         </div>
 
-        {/* Action Menu Trigger (Visible on hover or if active) */}
+        {/* Action Menu Trigger (Discoverable on idle, keyboard focus, and touch) */}
         {!isEditing && (
           <div
-            className={cn(
-              "shrink-0",
-              isActive
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 transition-opacity"
-            )}
+            className="shrink-0 w-7 flex items-center justify-center"
             onClick={(e) => e.stopPropagation()}
           >
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer focus:outline-none"
+                  aria-label="Conversation options"
+                  className={cn(
+                    "p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring transition-opacity",
+                    isActive ? "opacity-100 text-foreground" : "opacity-60 group-hover:opacity-100 focus:opacity-100"
+                  )}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   <More size={13} />
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-36 text-xs">
+              <DropdownMenuContent align="end" className="w-36 text-xs bg-surface-raised border border-border">
                 <DropdownMenuItem
-                  onClick={() => pinConversation(conv.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    pinConversation(conv.id)
+                  }}
                   className="text-xs cursor-pointer"
                 >
                   <Pin size={13} className="mr-2 text-beam" />
                   {conv.pinned ? "Unpin" : "Pin"}
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => handleStartRename(conv)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleStartRename(conv)
+                  }}
                   className="text-xs cursor-pointer"
                 >
                   <Edit size={13} className="mr-2 text-muted-foreground" />
                   Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => deleteConversation(conv.id)}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteConversation(conv.id)
+                  }}
                   className="text-xs text-deny focus:text-deny cursor-pointer"
                 >
                   <Trash size={13} className="mr-2" />

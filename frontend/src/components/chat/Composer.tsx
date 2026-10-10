@@ -311,8 +311,15 @@ export const Composer: React.FC<ComposerProps> = ({
 
             {/* Gatelight Depth Dial (3-Segment Pill with Ring Glyphs) */}
             <div
-              className="flex items-center rounded-lg bg-secondary border border-border p-0.5 text-[10px] select-none"
-              title={`Retrieval Depth: ${activeRetrievalMode}\nLOW: Fast vector search\nMEDIUM: Lazy query chunking & cache\nHIGH: Intent analysis & local reranking`}
+              className={cn(
+                "flex items-center rounded-lg bg-secondary border border-border p-0.5 text-[10px] select-none transition-opacity",
+                isLoading && "opacity-80"
+              )}
+              title={
+                isLoading
+                  ? `Mode locked for active query: ${activeRetrievalMode}`
+                  : `Retrieval Depth: ${activeRetrievalMode}\nLOW: Fast vector search\nMEDIUM: Lazy query chunking & cache\nHIGH: Intent analysis & local reranking`
+              }
             >
               {modes.map((m) => {
                 const isSelected = activeRetrievalMode === m.key
@@ -320,12 +327,14 @@ export const Composer: React.FC<ComposerProps> = ({
                   <button
                     key={m.key}
                     type="button"
+                    disabled={isLoading}
                     onClick={() => handleModeChange(m.key)}
                     className={cn(
-                      "flex items-center gap-1 px-1.5 py-0.5 rounded font-mono font-medium transition-all cursor-pointer",
+                      "flex items-center gap-1 px-1.5 py-0.5 rounded font-mono font-medium transition-all",
+                      isLoading ? "cursor-not-allowed" : "cursor-pointer",
                       isSelected
                         ? "bg-surface text-foreground font-semibold border border-border shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground"
                     )}
                   >
                     <span className="flex items-center gap-0.5">
@@ -366,13 +375,20 @@ export const Composer: React.FC<ComposerProps> = ({
         {/* Retrieval Mode Description Footer */}
         <div className="px-3.5 py-1 bg-surface border-t border-border/40 flex items-center justify-between text-[10px] text-muted-foreground select-none">
           <div className="flex items-center gap-1.5 truncate">
-            <span className="font-medium text-foreground">
-              Depth [{activeRetrievalMode}]:
-            </span>
+            {isLoading ? (
+              <span className="font-medium text-amber-500 flex items-center gap-1">
+                <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                Mode locked for this run: [{activeRetrievalMode}]
+              </span>
+            ) : (
+              <span className="font-medium text-foreground">
+                Depth [{activeRetrievalMode}]:
+              </span>
+            )}
             <span className="truncate">{activeModeObj.desc}</span>
           </div>
           <span className="font-mono text-[9px] text-muted-foreground shrink-0 hidden md:inline ml-2">
-            {activeModeObj.speed}
+            {isLoading ? "Query running..." : activeModeObj.speed}
           </span>
         </div>
       </div>

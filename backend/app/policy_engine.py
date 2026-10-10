@@ -182,13 +182,29 @@ class PolicyEngine:
                 raise ScopeViolation("Cross-tenant access strictly forbidden (TENANT_MISMATCH).")
 
             # Check if user is owner
-            if vault.owner_id == principal.user_id:
+            p_uid_clean = principal.user_id.replace("user:", "").strip().lower()
+            p_uname_clean = principal.username.strip().lower()
+            v_owner_clean = (vault.owner_id or "").replace("user:", "").strip().lower()
+            if p_uid_clean == v_owner_clean or p_uname_clean == v_owner_clean:
                 return vault
 
             # Check if user has an active grant for this vault
             has_grant = any(g.vault_id == vault.vault_id for g in usable_grants)
             if has_grant:
                 return vault
+
+            # Check if user is explicitly in allowed_users for any active resource in this vault
+            try:
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT allowed_users FROM resource_manifests WHERE vault_id = ?", (vault.vault_id,))
+                    for m_row in cursor.fetchall():
+                        raw_users = json.loads(m_row["allowed_users"] or "[]")
+                        clean_set = {u.replace("user:", "").strip().lower() for u in raw_users}
+                        if p_uid_clean in clean_set or p_uname_clean in clean_set:
+                            return vault
+            except Exception:
+                pass
 
             # Check if user has steward role or admin clearance
             if vault.steward_role_id and vault.steward_role_id in principal.roles:
@@ -299,31 +315,30 @@ class PolicyEngine:
             matched_rules.append("ManifestUserACL")
             return "ALLOW", "Authorized via resource user ACL", matched_rules
 
-        # 4. Role ACL on Resource Manifest
+        # 4. Vault Owner & Security Administrator Authority (§4, §32)
+        vault_owner_id = vault.owner_id if vault else None
+        if not vault_owner_id:
+            try:
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT owner_id FROM vaults WHERE vault_id = ?", (manifest.vault_id,))
+                    v_row = cursor.fetchone()
+                    if v_row:
+                        vault_owner_id = v_row["owner_id"]
+            except Exception:
+                pass
+
+        v_owner_clean = (vault_owner_id or "").replace("user:", "").strip().lower()
+        is_owner = (p_uid_clean == v_owner_clean or p_uname_clean == v_owner_clean)
+        is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+
+        if is_owner or is_admin:
+            matched_rules.append("VaultOwner" if is_owner else "AdminAccess")
+            return "ALLOW", f"Authorized as {'vault owner' if is_owner else 'security admin'}", matched_rules
+
+        # 5. Role ACL on Resource Manifest
         allowed_roles = set(f"role:{r}" if not r.startswith("role:") else r for r in manifest.allowed_roles)
         if subjects.intersection(allowed_roles):
-            # Resolve vault owner and determine authorization tier (§4, §32)
-            vault_owner_id = vault.owner_id if vault else None
-            if not vault_owner_id:
-                try:
-                    with db.get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT owner_id FROM vaults WHERE vault_id = ?", (manifest.vault_id,))
-                        v_row = cursor.fetchone()
-                        if v_row:
-                            vault_owner_id = v_row["owner_id"]
-                except Exception:
-                    pass
-
-            v_owner_clean = (vault_owner_id or "").replace("user:", "").strip().lower()
-            is_owner = (p_uid_clean == v_owner_clean or p_uname_clean == v_owner_clean)
-            is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
-
-            # Vault owners and admins have direct authority over manifest roles
-            if is_owner or is_admin:
-                matched_rules.append("ManifestRoleACL")
-                return "ALLOW", "Authorized via resource role ACL", matched_rules
-
             # Non-owner, non-admin callers CAN ONLY rely on role ACL if they hold a folder-wide grant!
             # If they hold only specific resource grants, unshared files are strictly DENIED!
             has_folder_wide_grant = any(

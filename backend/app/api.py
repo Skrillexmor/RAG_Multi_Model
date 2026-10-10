@@ -39,6 +39,8 @@ from .access_service import access_service, AccessServiceError
 from .federation import federation_service, FederationError
 from .ingestion import ingestion_pipeline, IngestionQuarantineError
 from .model_manager import local_model_manager
+import time
+from .conversation_service import conversation_service, ConversationNotFoundError, ConversationServiceError
 from .session_service import session_service, SessionError
 from .retrieval_modes import retrieval_pipeline
 
@@ -126,17 +128,140 @@ def get_current_principal(request: Request = None, authorization: Optional[str] 
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token signature or expired (T-AUTH-004).")
 
-# ----------------- AUTHENTICATED & AUTHORIZED MEDIA SERVER (§3.1, §11) -----------------
-@app.get("/api/media/{file_path:path}")
-def serve_media_file(
-    file_path: str,
+class MediaTicketRequest(BaseModel):
+    file_path: str
+
+@app.post("/api/media/ticket")
+def create_media_ticket(
+    req: MediaTicketRequest,
     principal: Principal = Depends(get_current_principal)
 ):
     """
+    Issues short-lived (60s), principal-bound ticket for streaming audio/video or native media elements (§Task D).
+    Validates current resource authorization before ticket minting.
+    """
+    safe_name = Path(req.file_path).name
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(status_code=403, detail="Path traversal forbidden.")
+    target_file = (MEDIA_DIR / safe_name).resolve()
+    if not target_file.exists() or not target_file.is_file():
+        raise HTTPException(status_code=404, detail="Media file not found.")
+    try:
+        target_file.relative_to(MEDIA_DIR.resolve())
+    except (ValueError, RuntimeError):
+        raise HTTPException(status_code=403, detail="Path traversal forbidden.")
+
+    now = time_authority.now()
+    usable = PolicyEngine.usable_grants(principal, now.timestamp)
+    is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
+
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT chunk_id, resource_id, vault_id FROM chunks WHERE provenance LIKE ? LIMIT 1", (f"%{safe_name}%",))
+        chunk_row = cursor.fetchone()
+        if chunk_row and not is_admin:
+            res_id = chunk_row["resource_id"]
+            cursor.execute("SELECT * FROM resource_manifests WHERE resource_id = ?", (res_id,))
+            m_row = cursor.fetchone()
+            if m_row:
+                manifest = ResourceManifest(
+                    resource_id=m_row["resource_id"],
+                    vault_id=m_row["vault_id"],
+                    tenant_id=m_row["tenant_id"],
+                    classification=m_row["classification"],
+                    allowed_roles=json.loads(m_row["allowed_roles"]),
+                    allowed_groups=json.loads(m_row["allowed_groups"]),
+                    allowed_users=json.loads(m_row["allowed_users"]),
+                    denied_users=json.loads(m_row["denied_users"]),
+                    denied_roles=json.loads(m_row["denied_roles"]),
+                    min_clearance=m_row["min_clearance"],
+                    operations=json.loads(m_row["operations"]),
+                    policy_version=m_row["policy_version"],
+                    acl_version=m_row["acl_version"]
+                )
+                cursor.execute("SELECT * FROM vaults WHERE vault_id = ?", (m_row["vault_id"],))
+                v_row = cursor.fetchone()
+                vault_obj = Vault(
+                    vault_id=v_row["vault_id"],
+                    tenant_id=v_row["tenant_id"],
+                    display_name=v_row["display_name"],
+                    slug=v_row["slug"],
+                    owner_id=v_row["owner_id"],
+                    classification_ceiling=v_row["classification_ceiling"],
+                    created_at=v_row["created_at"]
+                ) if v_row else None
+
+                decision, reason, _ = PolicyEngine.decide(
+                    principal=principal,
+                    action=ACTION_VIEW_SOURCE,
+                    manifest=manifest,
+                    usable_grants=usable,
+                    vault=vault_obj
+                )
+                if decision != "ALLOW":
+                    raise HTTPException(status_code=403, detail=f"Access denied: {reason}")
+
+    ticket_payload = {
+        "sub": principal.username,
+        "user_id": principal.user_id,
+        "tenant_id": principal.tenant_id,
+        "file": safe_name,
+        "type": "media_ticket",
+        "exp": int(time.time()) + 60
+    }
+    ticket = jwt.encode(ticket_payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return {
+        "ticket": ticket,
+        "expires_in": 60,
+        "media_url": f"/api/media/{safe_name}?ticket={ticket}"
+    }
+
+# ----------------- AUTHENTICATED & AUTHORIZED MEDIA SERVER (§3.1, §11, §Task D) -----------------
+@app.get("/api/media/{file_path:path}")
+def serve_media_file(
+    file_path: str,
+    request: Request,
+    ticket: Optional[str] = None,
+    authorization: Optional[str] = Header(None)
+):
+    """
     Authenticated and resource-authorized media server.
-    Serves images, keyframes, and audio with path traversal protection and resource ACL verification.
+    Accepts custom Authorization: Bearer token OR short-lived signed ?ticket parameter.
+    Serves images, keyframes, and audio with byte-range support, traversal protection, and ACL verification.
     """
     safe_name = Path(file_path).name
+    if not safe_name or safe_name in (".", ".."):
+        raise HTTPException(status_code=403, detail="Path traversal forbidden.")
+
+    # 1. Authoritative Authentication FIRST (§Task D, T-AUTH-004 - prevents resource enumeration)
+    principal: Optional[Principal] = None
+    if ticket:
+        if "?ticket=" in ticket:
+            ticket = ticket.split("?ticket=")[0]
+        elif "&ticket=" in ticket:
+            ticket = ticket.split("&ticket=")[0]
+        try:
+            payload = jwt.decode(ticket, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            if payload.get("type") != "media_ticket":
+                raise HTTPException(status_code=401, detail="Invalid media ticket type.")
+            if payload.get("file") != safe_name:
+                raise HTTPException(status_code=403, detail="Ticket does not match requested asset.")
+            uname = payload.get("sub")
+            principal = PolicyEngine.get_principal_by_username(uname)
+            if not principal and payload.get("user_id"):
+                with db.get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT username FROM users WHERE user_id = ?", (payload["user_id"],))
+                    u_row = cursor.fetchone()
+                    if u_row:
+                        principal = PolicyEngine.get_principal_by_username(u_row["username"])
+            if not principal or not principal.is_active:
+                raise HTTPException(status_code=401, detail="Principal inactive or invalid.")
+        except jwt.PyJWTError:
+            raise HTTPException(status_code=401, detail="Media ticket expired or signature invalid.")
+    else:
+        principal = get_current_principal(request=request, authorization=authorization)
+
     target_file = (MEDIA_DIR / safe_name).resolve()
     if not target_file.exists() or not target_file.is_file():
         raise HTTPException(status_code=404, detail="Media file not found.")
@@ -144,8 +269,9 @@ def serve_media_file(
     # Guard against directory traversal
     try:
         target_file.relative_to(MEDIA_DIR.resolve())
-    except ValueError:
+    except (ValueError, RuntimeError):
         raise HTTPException(status_code=403, detail="Path traversal forbidden.")
+
 
     now = time_authority.now()
     usable = PolicyEngine.usable_grants(principal, now.timestamp)
@@ -214,7 +340,8 @@ def serve_media_file(
         ".webm": "video/webm"
     }
     content_type = media_types.get(suffix, "application/octet-stream")
-    return FileResponse(path=str(target_file), media_type=content_type)
+    return FileResponse(path=str(target_file), media_type=content_type, headers={"Accept-Ranges": "bytes"})
+
 
 # ----------------- AUTH ENDPOINTS (§3.2, §3.3) -----------------
 class LoginRequest(BaseModel):
@@ -458,6 +585,131 @@ def logout(authorization: Optional[str] = Header(None)):
             pass
     return {"status": "LOGGED_OUT"}
 
+# ----------------- PUBLIC AUTH CONFIG & CAPABILITIES (§Task A) -----------------
+@app.get("/api/auth/config")
+def get_auth_config():
+    """Public unauthenticated operational configuration and capability state."""
+    return {
+        "app_name": "DARS-RAG / PrivateRAG",
+        "demo_mode": DEMO_MODE,
+        "offline_mode": True,
+        "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
+        "clock_status": time_authority.now().status
+    }
+
+# ----------------- AUTHORITATIVE PERSISTENT CONVERSATIONS (§Task C, §Task G) -----------------
+class CreateConversationRequest(BaseModel):
+    title: Optional[str] = "New Conversation"
+    vault_slug: Optional[str] = ""
+    selected_file_id: Optional[str] = None
+    selected_file_name: Optional[str] = None
+    conversation_id: Optional[str] = None
+
+class UpdateConversationRequest(BaseModel):
+    title: Optional[str] = None
+    pinned: Optional[bool] = None
+    vault_slug: Optional[str] = None
+    selected_file_id: Optional[str] = None
+    selected_file_name: Optional[str] = None
+
+class AppendMessageRequest(BaseModel):
+    role: str
+    content: str
+    message_id: Optional[str] = None
+    retrieval_mode: Optional[str] = "LOW"
+    citations: Optional[List[Dict[str, Any]]] = None
+    evidence_items: Optional[List[Dict[str, Any]]] = None
+    security_trace: Optional[Dict[str, Any]] = None
+    status: Optional[str] = "complete"
+    vault_slug: Optional[str] = None
+    selected_file_id: Optional[str] = None
+    selected_file_name: Optional[str] = None
+
+@app.get("/api/conversations")
+def list_conversations(principal: Principal = Depends(get_current_principal)):
+    """Lists conversations strictly owned by authenticated user and tenant."""
+    return {"conversations": conversation_service.list_conversations(principal)}
+
+@app.post("/api/conversations")
+def create_conversation(req: CreateConversationRequest, principal: Principal = Depends(get_current_principal)):
+    """Creates a new durable conversation strictly bound to authenticated principal."""
+    conv = conversation_service.create_conversation(
+        principal=principal,
+        title=req.title or "New Conversation",
+        vault_slug=req.vault_slug or "",
+        selected_file_id=req.selected_file_id,
+        selected_file_name=req.selected_file_name,
+        conversation_id=req.conversation_id
+    )
+    return {"conversation": conv}
+
+@app.get("/api/conversations/{conversation_id}")
+def get_conversation(conversation_id: str, principal: Principal = Depends(get_current_principal)):
+    """Loads an owned conversation. Returns non-leaking 404 if not owned by caller."""
+    conv = conversation_service.get_conversation(conversation_id, principal)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return {"conversation": conv}
+
+@app.put("/api/conversations/{conversation_id}")
+def update_conversation(conversation_id: str, req: UpdateConversationRequest, principal: Principal = Depends(get_current_principal)):
+    """Updates title, pin, or scope on an owned conversation."""
+    try:
+        updated = conversation_service.update_conversation(
+            conversation_id=conversation_id,
+            principal=principal,
+            title=req.title,
+            pinned=req.pinned,
+            vault_slug=req.vault_slug,
+            selected_file_id=req.selected_file_id,
+            selected_file_name=req.selected_file_name
+        )
+        return {"conversation": updated}
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str, principal: Principal = Depends(get_current_principal)):
+    """Deletes an owned conversation. Returns non-leaking 404 if foreign."""
+    try:
+        conversation_service.delete_conversation(conversation_id, principal)
+        return {"status": "DELETED", "conversation_id": conversation_id}
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+@app.post("/api/conversations/{conversation_id}/messages")
+def append_conversation_message(conversation_id: str, req: AppendMessageRequest, principal: Principal = Depends(get_current_principal)):
+    """Appends turn to owned conversation."""
+    try:
+        msg = conversation_service.append_message(
+            conversation_id=conversation_id,
+            principal=principal,
+            role=req.role,
+            content=req.content,
+            message_id=req.message_id,
+            retrieval_mode=req.retrieval_mode,
+            citations=req.citations,
+            evidence_items=req.evidence_items,
+            security_trace=req.security_trace,
+            status=req.status,
+            vault_slug=req.vault_slug,
+            selected_file_id=req.selected_file_id,
+            selected_file_name=req.selected_file_name
+        )
+        return {"message": msg}
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+@app.get("/api/conversations/{conversation_id}/memory")
+def get_conversation_memory(conversation_id: str, principal: Principal = Depends(get_current_principal)):
+    """Retrieves isolated rolling summary for an owned conversation."""
+    try:
+        mem = conversation_service.get_memory(conversation_id, principal)
+        return {"memory": mem}
+    except ConversationNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+
 # ----------------- LOCAL LLM STATUS & SETUP GUIDE -----------------
 @app.get("/api/llm/status")
 def get_llm_status(principal: Principal = Depends(get_current_principal)):
@@ -494,7 +746,7 @@ def list_vaults(principal: Principal = Depends(get_current_principal)):
 
                 # Fetch real active documents for this vault
                 cursor.execute("""
-                    SELECT resource_id, vault_id, resource_type, title, classification, status, created_at,
+                    SELECT resource_id, vault_id, resource_type, title, classification, status, created_at, owner_user_id,
                            (SELECT COUNT(*) FROM chunks c WHERE c.resource_id = resources.resource_id) as chunks_count
                     FROM resources
                     WHERE vault_id = ? AND status = 'active'
@@ -573,7 +825,7 @@ def get_vault_documents(vault_slug: str, principal: Principal = Depends(get_curr
     with db.get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT resource_id, vault_id, resource_type, title, classification, status, created_at,
+            SELECT resource_id, vault_id, resource_type, title, classification, status, created_at, owner_user_id,
                    (SELECT COUNT(*) FROM chunks c WHERE c.resource_id = resources.resource_id) as chunks_count
             FROM resources
             WHERE vault_id = ? AND status = 'active'
@@ -875,7 +1127,10 @@ def assign_vault(vault_slug_or_id: str, body: AssignVaultRequest, principal: Pri
             raise HTTPException(status_code=404, detail="Folder/Vault not found.")
 
         vid = vault["vault_id"]
-        if vault["owner_id"] != principal.user_id and "admin" not in principal.roles:
+        v_owner = (vault["owner_id"] or "").replace("user:", "").strip().lower()
+        p_uid = principal.user_id.replace("user:", "").strip().lower()
+        p_uname = principal.username.strip().lower()
+        if p_uid != v_owner and p_uname != v_owner and "admin" not in principal.roles:
             raise HTTPException(status_code=403, detail="Unauthorized: Only folder owner can assign permissions.")
 
         # Determine target grantees
@@ -920,7 +1175,11 @@ def assign_vault(vault_slug_or_id: str, body: AssignVaultRequest, principal: Pri
         clean_actions = []
         for act in raw_actions:
             c_act = act[7:] if act.startswith("action:") else act
-            if c_act not in clean_actions:
+            if c_act == "read":
+                for standard_act in (ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE, ACTION_VIEW_SOURCE):
+                    if standard_act not in clean_actions:
+                        clean_actions.append(standard_act)
+            elif c_act not in clean_actions:
                 clean_actions.append(c_act)
         if not clean_actions:
             clean_actions = [ACTION_QUERY_RAG, ACTION_RETRIEVE_EVIDENCE]
@@ -1619,9 +1878,37 @@ def query_rag(
     Gate B: Post-retrieval canonical SQL manifest + encrypted storage decrypt & hash verify
     LLM Context ⊆ Authorized Evidence
     """
+    start_time = time.perf_counter()
     effective_slug = vault_slug or req.vault_slug
     if not effective_slug:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="vault_slug is required")
+
+    # Authoritative conversation ownership & isolation validation (§Task C, §Task G)
+    conv_data = None
+    if req.conversation_id:
+        conv_data = conversation_service.get_conversation(req.conversation_id, principal)
+        if not conv_data:
+            with db.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT owner_user_id, tenant_id FROM conversations WHERE conversation_id = ?",
+                    (req.conversation_id,)
+                )
+                existing_conv = cursor.fetchone()
+
+            if existing_conv:
+                # Belongs to another user or tenant -> strict non-leaking 404
+                raise HTTPException(status_code=404, detail="Conversation not found.")
+            else:
+                # Client initiated a new conversation locally; auto-register it in server store
+                clean_title = (req.query[:40] if req.query else "New Conversation").strip()
+                conv_data = conversation_service.create_conversation(
+                    principal=principal,
+                    title=clean_title,
+                    vault_slug=effective_slug,
+                    selected_file_id=req.resource_id,
+                    conversation_id=req.conversation_id
+                )
 
     req_id = f"req_{uuid4().hex[:8]}"
     client_ip = request.client.host if request.client else "127.0.0.1"
@@ -1659,9 +1946,13 @@ def query_rag(
     )
 
     # 4. Gate A: Contextual Query Expansion & Adaptive Retrieval Mode (LOW, MEDIUM, HIGH)
+    effective_history = req.history
+    if not effective_history and req.conversation_id:
+        effective_history = conversation_service.build_bounded_context(req.conversation_id, principal)
+
     search_query = req.query
-    if req.history:
-        search_query = local_llm.contextualize_query(req.query, req.history)
+    if effective_history:
+        search_query = local_llm.contextualize_query(req.query, effective_history)
 
     retrieval_mode = (req.retrieval_mode or "LOW").upper()
     if retrieval_mode not in ("LOW", "MEDIUM", "HIGH"):
@@ -1682,6 +1973,7 @@ def query_rag(
             "No active documents or media files have been uploaded to it yet. "
             "Please upload files into this folder to enable grounded questions and answers."
         )
+        elapsed_sec = round(time.perf_counter() - start_time, 3)
         gate_a_data = {"compiled_filter_valid": True, "candidates_count": 0}
         gate_b_data = {"evaluated_count": 0, "authorized_count": 0, "excluded_count": 0}
         grounding_data = {"claims_count": 0, "citations_count": 0, "status": "REFUSED"}
@@ -1691,6 +1983,8 @@ def query_rag(
             vault_slug=vault.slug,
             policy_epoch=lease.policy_epoch,
             retrieval_mode=retrieval_mode,
+            effective_retrieval_mode=retrieval_mode,
+            elapsed_seconds=elapsed_sec,
             vector_filter_applied=compiled_filter.to_dict(),
             gate_a_candidates_count=0,
             gate_b_canonical_verified_count=0,
@@ -1715,6 +2009,27 @@ def query_rag(
             reason_code="FOLDER_EMPTY",
             client_ip=client_ip
         )
+        if req.conversation_id:
+            conversation_service.append_message(
+                conversation_id=req.conversation_id,
+                principal=principal,
+                role="user",
+                content=req.query,
+                retrieval_mode=retrieval_mode,
+                vault_slug=vault.slug,
+                selected_file_id=req.resource_id
+            )
+            conversation_service.append_message(
+                conversation_id=req.conversation_id,
+                principal=principal,
+                role="assistant",
+                content=empty_answer,
+                retrieval_mode=retrieval_mode,
+                security_trace=trace.model_dump(),
+                status="REFUSED",
+                vault_slug=vault.slug,
+                selected_file_id=req.resource_id
+            )
         return QueryResponse(
             query=req.query,
             vault_slug=vault.slug,
@@ -1724,7 +2039,9 @@ def query_rag(
             citations=[],
             evidence_items=[],
             security_trace=trace,
-            lease_deadline=lease.deadline
+            lease_deadline=lease.deadline,
+            conversation_id=req.conversation_id,
+            elapsed_seconds=elapsed_sec
         )
 
     candidate_tuples = retrieval_pipeline.retrieve(
@@ -1753,7 +2070,7 @@ def query_rag(
         query=req.query,
         vault=vault,
         evidence=authorized_evidence,
-        history=req.history
+        history=effective_history
     )
 
     # 7. Grounding & Citation Validation (§62, §63, §64)
@@ -1786,6 +2103,8 @@ def query_rag(
         client_ip=client_ip
     )
 
+    elapsed_sec = round(time.perf_counter() - start_time, 3)
+
     gate_a_data = {
         "compiled_filter_valid": True,
         "candidates_count": gate_a_count
@@ -1807,6 +2126,8 @@ def query_rag(
         vault_slug=vault.slug,
         policy_epoch=lease.policy_epoch,
         retrieval_mode=retrieval_mode,
+        effective_retrieval_mode=retrieval_mode,
+        elapsed_seconds=elapsed_sec,
         vector_filter_applied=compiled_filter.to_dict(),
         gate_a_candidates_count=gate_a_count,
         gate_b_canonical_verified_count=len(authorized_evidence),
@@ -1821,6 +2142,31 @@ def query_rag(
         grounding=grounding_data
     )
 
+    # 9. Server-Side Conversation Turn Persistence (§Task C, §Task G)
+    if req.conversation_id:
+        conversation_service.append_message(
+            conversation_id=req.conversation_id,
+            principal=principal,
+            role="user",
+            content=req.query,
+            retrieval_mode=retrieval_mode,
+            vault_slug=vault.slug,
+            selected_file_id=req.resource_id
+        )
+        conversation_service.append_message(
+            conversation_id=req.conversation_id,
+            principal=principal,
+            role="assistant",
+            content=answer_text,
+            retrieval_mode=retrieval_mode,
+            citations=[c.dict() for c in updated_citations],
+            evidence_items=[e.dict() for e in authorized_evidence],
+            security_trace=trace.dict(),
+            status=answer_status,
+            vault_slug=vault.slug,
+            selected_file_id=req.resource_id
+        )
+
     return QueryResponse(
         query=req.query,
         vault_slug=vault.slug,
@@ -1830,7 +2176,9 @@ def query_rag(
         citations=updated_citations,
         evidence_items=authorized_evidence,
         security_trace=trace,
-        lease_deadline=lease.deadline
+        lease_deadline=lease.deadline,
+        conversation_id=req.conversation_id,
+        elapsed_seconds=elapsed_sec
     )
 
 # ----------------- SECURE DIRECT SOURCE FETCH API (§28, §29) -----------------
@@ -1939,7 +2287,8 @@ async def upload_multimodal_file(
             file_bytes=file_bytes,
             classification=classification or 1,
             min_clearance=min_clearance or 1,
-            allowed_roles=roles_list
+            allowed_roles=roles_list,
+            owner_user_id=principal.user_id
         )
     except IngestionQuarantineError as q_err:
         raise HTTPException(status_code=400, detail=str(q_err))
@@ -2176,18 +2525,24 @@ def list_system_grants(principal: Principal = Depends(get_current_principal)):
 @app.post("/api/grants/create")
 def create_grant_direct(body: CreateGrantDirectRequest, principal: Principal = Depends(get_current_principal)):
     is_admin = any(r in principal.roles for r in ("admin", "security_admin"))
-    vault = db.get_vault(body.vault_id) or db.get_vault_by_slug(body.vault_id)
-    if not vault:
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM vaults WHERE vault_id = ? OR slug = ?", (body.vault_id, body.vault_id))
+        v_row = cursor.fetchone()
+    if not v_row:
         raise HTTPException(status_code=404, detail="Target vault not found.")
+    
+    vault_id = v_row["vault_id"]
+    vault_owner = v_row["owner_id"]
     
     p_clean = principal.user_id.replace("user:", "").strip().lower()
     p_uname = principal.username.strip().lower()
-    v_owner = (vault.owner_id or "").replace("user:", "").strip().lower()
+    v_owner = (vault_owner or "").replace("user:", "").strip().lower()
 
     if not is_admin and v_owner not in (p_clean, p_uname):
         now_ts = time_authority.now().timestamp
         usable = PolicyEngine.usable_grants(principal, now_ts)
-        has_delegable = any(g.vault_id == vault.vault_id and g.delegable for g in usable)
+        has_delegable = any(g.vault_id == vault_id and g.delegable for g in usable)
         if not has_delegable:
             raise HTTPException(status_code=403, detail="Unauthorized: Only vault owners, admins, or delegable grant holders can issue grants.")
 
@@ -2196,7 +2551,7 @@ def create_grant_direct(body: CreateGrantDirectRequest, principal: Principal = D
 
     with db.get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT grant_id, selector FROM grants WHERE vault_id = ? AND grantee_id IN (?, ?) AND state = 'active'", (vault.vault_id, clean_grantee, f"user:{clean_grantee}"))
+        cursor.execute("SELECT grant_id, selector FROM grants WHERE vault_id = ? AND grantee_id IN (?, ?) AND state = 'active'", (vault_id, clean_grantee, f"user:{clean_grantee}"))
         for old_g in cursor.fetchall():
             try:
                 old_sel = json.loads(old_g["selector"] or "{}")
@@ -2215,7 +2570,7 @@ def create_grant_direct(body: CreateGrantDirectRequest, principal: Principal = D
     new_grant = access_service.issue_grant(
         issuer=principal,
         grantee_id=clean_grantee,
-        vault_id=vault.vault_id,
+        vault_id=vault_id,
         actions=body.actions or ["read"],
         valid_until=valid_until,
         selector=selector,
@@ -2235,7 +2590,8 @@ def create_grant_direct(body: CreateGrantDirectRequest, principal: Principal = D
                     cursor.execute("UPDATE resource_manifests SET allowed_users = ? WHERE resource_id = ?", (json.dumps(cur_users), target_res))
                     conn.commit()
 
-    return {"message": "Grant created successfully", "grant": new_grant}
+    gid = new_grant.grant_id if hasattr(new_grant, "grant_id") else (new_grant.get("grant_id") if isinstance(new_grant, dict) else None)
+    return {"message": "Grant created successfully", "grant": new_grant, "grant_id": gid}
 
 # ----------------- SYSTEM TELEMETRY & HARDWARE METRICS -----------------
 @app.get("/api/system/metrics")

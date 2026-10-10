@@ -18,11 +18,50 @@ import { RequestAccessModal } from "../security/RequestAccessModal"
 import { AuthModal } from "../auth/AuthModal"
 import { SessionWarningModal } from "../auth/SessionWarningModal"
 import { LlmAssistantModal } from "../settings/LlmAssistantModal"
+import { SignedOutView } from "../auth/SignedOutView"
+import { Shield, Loader2 } from "lucide-react"
 import { Toaster } from "sonner"
 
 export const AppShell: React.FC = () => {
-  const { currentView, activeInspector, closeInspector, refreshVaults } = useApp()
+  const {
+    currentView,
+    activeInspector,
+    closeInspector,
+    refreshVaults,
+    principal,
+    isLoadingUser,
+  } = useApp()
   const [requestAccessVaultSlug, setRequestAccessVaultSlug] = useState<string | null>(null)
+
+  // 1. Loading state during cold start / session restoration check
+  if (isLoadingUser) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-background text-foreground font-mono space-y-3 select-none">
+        <div className="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+          <Shield className="h-5 w-5 animate-pulse" />
+        </div>
+        <div className="text-xs text-muted-foreground flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-500" />
+          <span>Verifying enclave authentication...</span>
+        </div>
+      </div>
+    )
+  }
+
+  // 2. Authoritative Signed-Out State: Render dedicated SignedOutView (no leaking background workspace)
+  if (!principal) {
+    return (
+      <>
+        <SignedOutView />
+        <Toaster
+          position="bottom-right"
+          toastOptions={{
+            className: "bg-surface-raised border border-border text-foreground text-xs shadow-xl e2",
+          }}
+        />
+      </>
+    )
+  }
 
   const renderMainView = () => {
     switch (currentView) {

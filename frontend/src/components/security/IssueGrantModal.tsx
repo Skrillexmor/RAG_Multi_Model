@@ -91,7 +91,7 @@ export const IssueGrantModal: React.FC<IssueGrantModalProps> = ({
         grantee_id: selectedGrantee,
         vault_id: selectedVaultId,
         resource_id: selectedDocId !== "ALL" ? selectedDocId : undefined,
-        actions: ["read"],
+        actions: ["query_rag", "retrieve_evidence", "view_source"],
         duration_minutes: durationMinutes,
         delegable: isDelegable,
         purpose: effectivePurpose,

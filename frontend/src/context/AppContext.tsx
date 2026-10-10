@@ -9,6 +9,7 @@ import {
   RetrievalSecurityTrace,
   TimeStatus,
   LlmStatus,
+  AuthConfig,
 } from "../types"
 import { DEMO_PERSONAS } from "../lib/personas"
 import { api, ApiError } from "../lib/api"
@@ -32,6 +33,9 @@ export type AppView =
   | "settings"
 
 interface AppContextType {
+  // Auth Config & System Settings
+  authConfig: AuthConfig | null
+
   // Persona & Principal
   persona: DemoPersona
   principal: Principal | null
@@ -100,7 +104,8 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined)
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [persona, setPersona] = useState<DemoPersona>(DEMO_PERSONAS[0]) // Alice
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null)
+  const [persona, setPersona] = useState<DemoPersona>(DEMO_PERSONAS[0]) // Alice default visual fallback
   const [principal, setPrincipal] = useState<Principal | null>(null)
   const [vaults, setVaults] = useState<Vault[]>([])
   const [selectedVault, setSelectedVault] = useState<Vault | null>(null)
@@ -127,47 +132,107 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false)
   const [isLoadingUser, setIsLoadingUser] = useState<boolean>(true)
 
-  // 1. Load initial user and authenticate
-  const initializeAuth = useCallback(async (targetPersona: DemoPersona) => {
+  const authGenerationRef = useRef<number>(0)
+  const lastActivityReportRef = useRef<number>(Date.now())
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
+
+  // Leak-proof state reset on sign-out, session expiration, or cross-tab logout
+  const resetAuthState = useCallback(() => {
+    api.setToken(null)
+    setPrincipal(null)
+    setVaults([])
+    setSelectedVault(null)
+    setSelectedTargetFile(null)
+    setConversations([])
+    setActiveConversationId(null)
+    setActiveInspector(null)
+    setViewParam(null)
+    setCurrentView("chat")
+    setIsAuthModalOpen(false)
+    setLeaseDeadline(null)
+    setLeaseSecondsRemaining(0)
+    setSessionRemainingSeconds(0)
+  }, [])
+
+  // 1. Authoritative initial auth check (Restores ONLY valid sessions; fail-closed signed-out state otherwise)
+  const initializeAuth = useCallback(async () => {
     setIsLoadingUser(true)
+    const gen = ++authGenerationRef.current
     try {
-      // Check if existing session token is stored and valid
-      if (api.getToken()) {
-        try {
-          const meRes = await api.getMe() as any
-          const currentPrincipal: Principal = meRes.principal || meRes
-          setPrincipal(currentPrincipal)
-          const matched = DEMO_PERSONAS.find((p) => p.username === currentPrincipal.username.toLowerCase())
-          if (matched) {
-            setPersona(matched)
-          }
-          setLeaseSecondsRemaining(300)
-          setSessionRemainingSeconds(300)
-          return
-        } catch {
-          // Token invalid or expired - clear it and require re-authentication
-          api.setToken(null)
-          setPrincipal(null)
+      // Fetch public server auth config
+      try {
+        const config = await api.getAuthConfig()
+        if (gen === authGenerationRef.current) {
+          setAuthConfig(config)
         }
+      } catch (e) {
+        console.warn("Failed to fetch auth config:", e)
       }
 
-      // Try login with target persona credentials
-      try {
-        const loginRes = await api.login(targetPersona.username, `${targetPersona.username}123`)
-        setPrincipal(loginRes.principal)
-        setLeaseSecondsRemaining(300)
-        setSessionRemainingSeconds(300)
-      } catch (err: any) {
-        console.warn("Authentication required:", err)
-        // Fail-closed: Never fake an in-memory principal
-        setPrincipal(null)
-        api.setToken(null)
-        setIsAuthModalOpen(true)
+      // Check for existing session token in sessionStorage
+      const existingToken = api.getToken()
+      if (existingToken) {
+        try {
+          const meRes = (await api.getMe()) as any
+          if (gen !== authGenerationRef.current) return
+          const currentPrincipal: Principal = meRes.principal || meRes
+          setPrincipal(currentPrincipal)
+
+          const matched = DEMO_PERSONAS.find(
+            (p) => p.username === currentPrincipal.username.toLowerCase()
+          )
+          if (matched) {
+            setPersona(matched)
+          } else {
+            setPersona({
+              username: currentPrincipal.username,
+              name: currentPrincipal.username.charAt(0).toUpperCase() + currentPrincipal.username.slice(1),
+              roleTitle: currentPrincipal.roles.join(", "),
+              roles: currentPrincipal.roles,
+              clearanceLevel: currentPrincipal.clearance_level,
+              description: `Authenticated Principal (${currentPrincipal.roles.join(", ")})`,
+              accessibleVaults: [],
+            })
+          }
+
+          setLeaseSecondsRemaining(300)
+          setSessionRemainingSeconds(300)
+
+          // Load user-scoped vaults and conversations
+          const vRes = await api.getVaults()
+          if (gen === authGenerationRef.current) {
+            setVaults(vRes.vaults || [])
+            if (vRes.vaults?.length) {
+              setSelectedVault(vRes.vaults[0])
+            }
+            const userConvs = storage.getConversations(
+              currentPrincipal.username,
+              currentPrincipal.user_id
+            )
+            setConversations(userConvs)
+            if (userConvs.length > 0) {
+              setActiveConversationId(userConvs[0].id)
+            }
+          }
+          return
+        } catch {
+          // Token invalid or expired - fail-closed
+          if (gen === authGenerationRef.current) {
+            resetAuthState()
+          }
+        }
+      } else {
+        // No token present - true signed-out state
+        if (gen === authGenerationRef.current) {
+          resetAuthState()
+        }
       }
     } finally {
-      setIsLoadingUser(false)
+      if (gen === authGenerationRef.current) {
+        setIsLoadingUser(false)
+      }
     }
-  }, [])
+  }, [resetAuthState])
 
   // 2. Fetch Vaults
   const refreshVaults = useCallback(async () => {
@@ -197,9 +262,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     async (username: string) => {
       const target = DEMO_PERSONAS.find((p) => p.username === username)
       if (!target) return
+      setIsLoadingUser(true)
+      const gen = ++authGenerationRef.current
 
       try {
         const loginRes = await api.login(target.username, `${target.username}123`)
+        if (gen !== authGenerationRef.current) return
         setPersona(target)
         setPrincipal(loginRes.principal)
 
@@ -207,16 +275,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveInspector(null)
         setLeaseSecondsRemaining(300)
         setSessionRemainingSeconds(300)
+        setIsAuthModalOpen(false)
 
         // Reload vaults for new user
         const vRes = await api.getVaults()
         setVaults(vRes.vaults || [])
         if (vRes.vaults?.length) {
           setSelectedVault(vRes.vaults[0])
+        } else {
+          setSelectedVault(null)
         }
 
-        // Reload conversations for this persona
-        const userConversations = storage.getConversations(target.username)
+        // Reload user-scoped conversations
+        const userConversations = storage.getConversations(target.username, loginRes.principal.user_id)
         setConversations(userConversations)
         if (userConversations.length > 0) {
           setActiveConversationId(userConversations[0].id)
@@ -229,6 +300,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         })
       } catch (err: any) {
         toast.error(`Failed to switch persona: ${err.message}`)
+      } finally {
+        if (gen === authGenerationRef.current) {
+          setIsLoadingUser(false)
+        }
       }
     },
     []
@@ -247,8 +322,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // 6. Direct Login & Register
   const loginWithCredentials = useCallback(async (username: string, password?: string) => {
     setIsLoadingUser(true)
+    const gen = ++authGenerationRef.current
     try {
       const res = await api.login(username, password)
+      if (gen !== authGenerationRef.current) return
       setPrincipal(res.principal)
       const matched = DEMO_PERSONAS.find((p) => p.username === username.toLowerCase())
       if (matched) {
@@ -271,8 +348,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setVaults(vRes.vaults || [])
       if (vRes.vaults?.length) {
         setSelectedVault(vRes.vaults[0])
+      } else {
+        setSelectedVault(null)
       }
-      const userConversations = storage.getConversations(res.principal.username)
+      const userConversations = storage.getConversations(res.principal.username, res.principal.user_id)
       setConversations(userConversations)
       setActiveConversationId(userConversations.length > 0 ? userConversations[0].id : null)
       setIsAuthModalOpen(false)
@@ -283,14 +362,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.error(`Login failed: ${err.message}`)
       throw err
     } finally {
-      setIsLoadingUser(false)
+      if (gen === authGenerationRef.current) {
+        setIsLoadingUser(false)
+      }
     }
   }, [])
 
   const registerUser = useCallback(async (payload: { username: string; password: string; department?: string; roles?: string[]; clearance?: number }) => {
     setIsLoadingUser(true)
+    const gen = ++authGenerationRef.current
     try {
       const res = await api.register(payload)
+      if (gen !== authGenerationRef.current) return
       setPrincipal(res.principal)
       setPersona({
         username: res.principal.username,
@@ -308,6 +391,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setVaults(vRes.vaults || [])
       if (vRes.vaults?.length) {
         setSelectedVault(vRes.vaults[0])
+      } else {
+        setSelectedVault(null)
       }
       setConversations([])
       setActiveConversationId(null)
@@ -319,41 +404,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       toast.error(`Registration failed: ${err.message}`)
       throw err
     } finally {
-      setIsLoadingUser(false)
+      if (gen === authGenerationRef.current) {
+        setIsLoadingUser(false)
+      }
     }
   }, [])
 
   // 7. Initial Mount
   useEffect(() => {
-    initializeAuth(persona).then(() => {
-      refreshVaults()
+    initializeAuth()
+  }, [initializeAuth])
+
+  // When authenticated, refresh LLM and time status
+  useEffect(() => {
+    if (principal) {
       refreshSystemStatus()
       refreshLlmStatus()
-      setConversations(storage.getConversations(persona.username))
-    })
-  }, [])
+    }
+  }, [principal, refreshSystemStatus, refreshLlmStatus])
 
-  // 8. Session & Inactivity Management (§300s Authoritative Inactivity)
-  const lastActivityReportRef = useRef<number>(Date.now())
-  const broadcastChannelRef = useRef<BroadcastChannel | null>(null)
-
+  // 8. Session & Inactivity Management
   const logout = useCallback(async () => {
+    authGenerationRef.current += 1
     try {
       await api.logout()
     } catch {
       // ignore
     }
-    api.setToken(null)
-    setPrincipal(null)
-    setActiveInspector(null)
-    setIsAuthModalOpen(true)
+    resetAuthState()
     if (broadcastChannelRef.current) {
       try {
         broadcastChannelRef.current.postMessage({ type: "LOGOUT" })
       } catch {}
     }
     toast.info("Signed out of session")
-  }, [])
+  }, [resetAuthState])
 
   const renewSession = useCallback(async () => {
     try {
@@ -428,10 +513,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       bc.onmessage = (event) => {
         const data = event.data
         if (data?.type === "LOGOUT" || data?.type === "EXPIRED") {
-          api.setToken(null)
-          setPrincipal(null)
-          setActiveInspector(null)
-          setIsAuthModalOpen(true)
+          resetAuthState()
         } else if (data?.type === "ACTIVITY" || data?.type === "RENEWED") {
           setSessionRemainingSeconds(data.remainingSeconds || 300)
         }
@@ -442,9 +524,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const onStorage = (e: StorageEvent) => {
       if (e.key === "rag_token" && !e.newValue) {
-        setPrincipal(null)
-        setActiveInspector(null)
-        setIsAuthModalOpen(true)
+        resetAuthState()
       }
     }
     window.addEventListener("storage", onStorage)
@@ -453,7 +533,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       window.removeEventListener("storage", onStorage)
       if (bc) bc.close()
     }
-  }, [])
+  }, [resetAuthState])
 
   // Inactivity countdown ticker & periodic background sync
   useEffect(() => {
@@ -462,10 +542,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const timer = setInterval(() => {
       setSessionRemainingSeconds((prev) => {
         if (prev <= 1) {
-          api.setToken(null)
-          setPrincipal(null)
-          setActiveInspector(null)
-          setIsAuthModalOpen(true)
+          resetAuthState()
           if (broadcastChannelRef.current) {
             try {
               broadcastChannelRef.current.postMessage({ type: "EXPIRED" })
@@ -484,10 +561,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const status = await api.getSessionStatus()
         // Only force logout if the server authoritative check explicitly reports expired or revoked
         if (status && status.active === false && (status.reason === "INACTIVITY_EXPIRED" || status.reason === "SESSION_REVOKED")) {
-          api.setToken(null)
-          setPrincipal(null)
-          setActiveInspector(null)
-          setIsAuthModalOpen(true)
+          resetAuthState()
           if (broadcastChannelRef.current) {
             try {
               broadcastChannelRef.current.postMessage({ type: "EXPIRED" })
@@ -550,14 +624,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const saveConversation = (conv: Conversation) => {
-    storage.saveConversation(conv)
-    setConversations(storage.getConversations(persona.username))
+    const userId = principal?.user_id
+    storage.saveConversation(conv, userId)
+    setConversations(storage.getConversations(persona.username, userId))
     setActiveConversationId(conv.id)
+    if (principal && api.getToken()) {
+      api.createConversation({
+        conversation_id: conv.id,
+        title: conv.title,
+        vault_slug: conv.vaultSlug,
+        selected_file_id: conv.selectedFileId,
+        selected_file_name: conv.selectedFileName,
+        pinned: conv.pinned,
+      }).catch(() => {})
+    }
   }
 
   const deleteConversation = (id: string) => {
-    storage.deleteConversation(id)
-    const remaining = storage.getConversations(persona.username)
+    const userId = principal?.user_id
+    storage.deleteConversation(id, userId)
+    const remaining = storage.getConversations(persona.username, userId)
     setConversations(remaining)
     if (activeConversationId === id) {
       setActiveConversationId(remaining.length ? remaining[0].id : null)
@@ -566,15 +652,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }
 
   const renameConversation = (id: string, newTitle: string) => {
-    storage.renameConversation(id, newTitle)
-    setConversations(storage.getConversations(persona.username))
+    const userId = principal?.user_id
+    storage.renameConversation(id, newTitle, userId)
+    setConversations(storage.getConversations(persona.username, userId))
   }
 
   const pinConversation = (id: string) => {
     const conv = conversations.find((c) => c.id === id)
     if (conv) {
-      storage.pinConversation(id, !conv.pinned)
-      setConversations(storage.getConversations(persona.username))
+      const userId = principal?.user_id
+      storage.pinConversation(id, !conv.pinned, userId)
+      setConversations(storage.getConversations(persona.username, userId))
     }
   }
 
@@ -603,6 +691,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        authConfig,
         persona,
         principal,
         switchPersona,

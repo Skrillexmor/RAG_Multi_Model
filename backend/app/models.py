@@ -66,12 +66,24 @@ class Principal(BaseModel):
             self.groups = list(dict.fromkeys(self.groups))
 
     def subjects(self) -> List[str]:
-        res = [f"user:{self.user_id}", f"dept:{self.department}"]
+        raw_uid = self.user_id.replace("user:", "").strip()
+        raw_uname = self.username.strip()
+        res = [
+            f"user:{raw_uid}",
+            raw_uid,
+            f"user:{raw_uname}",
+            raw_uname,
+            f"dept:{self.department}"
+        ]
         for r in self.roles:
-            res.append(f"role:{r}")
+            clean_r = r.replace("role:", "").strip()
+            res.append(f"role:{clean_r}")
+            res.append(clean_r)
         for g in self.groups:
-            res.append(f"group:{g}")
-        return res
+            clean_g = g.replace("group:", "").strip()
+            res.append(f"group:{clean_g}")
+            res.append(clean_g)
+        return list(dict.fromkeys(res))
 
 # Vault / Dataset Model (§4, §32)
 class Vault(BaseModel):
@@ -230,6 +242,7 @@ class QueryRequest(BaseModel):
     client_supplied_filter: Optional[Dict[str, Any]] = None
     history: Optional[List[Dict[str, Any]]] = None
     retrieval_mode: RetrievalMode = "LOW"
+    conversation_id: Optional[str] = None
 
 class Citation(BaseModel):
     citation_id: str
@@ -262,6 +275,8 @@ class RetrievalSecurityTrace(BaseModel):
     answer_status: Literal["GROUNDED", "REFUSED", "CITATION_MISMATCH", "SAFE_EXTRACTIVE"]
     refusal_reason: Optional[str] = None
     retrieval_mode: Optional[str] = "LOW"
+    effective_retrieval_mode: Optional[str] = None
+    elapsed_seconds: Optional[float] = None
     gate_a: Optional[Dict[str, Any]] = None
     gate_b: Optional[Dict[str, Any]] = None
     grounding: Optional[Dict[str, Any]] = None
@@ -276,6 +291,9 @@ class QueryResponse(BaseModel):
     security_trace: RetrievalSecurityTrace
     lease_deadline: str
     retrieval_mode: Optional[str] = "LOW"
+    conversation_id: Optional[str] = None
+    elapsed_seconds: Optional[float] = None
+
 
 class AuditCheckpoint(BaseModel):
     checkpoint_id: str

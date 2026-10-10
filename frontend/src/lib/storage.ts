@@ -1,8 +1,52 @@
 import { Conversation } from "../types"
 
-const CONVERSATIONS_KEY = "dars_rag_conversations"
+const LEGACY_CONVERSATIONS_KEY = "dars_rag_conversations"
 const THEME_KEY = "dars_rag_theme"
 const DENSITY_KEY = "dars_rag_density"
+
+function getStorageKey(userId?: string): string {
+  if (userId && userId.trim()) {
+    return `dars_rag_conversations_${userId.trim()}`
+  }
+  return LEGACY_CONVERSATIONS_KEY
+}
+
+// One-time safe migration helper from legacy global storage to user-scoped storage
+function migrateLegacyConversationsIfNeeded(userId: string, persona?: string): void {
+  try {
+    const userKey = getStorageKey(userId)
+    const existingUserData = localStorage.getItem(userKey)
+    if (existingUserData) {
+      // User storage already initialized
+      return
+    }
+
+    const legacyRaw = localStorage.getItem(LEGACY_CONVERSATIONS_KEY)
+    if (!legacyRaw) return
+
+    const legacyList: Conversation[] = JSON.parse(legacyRaw)
+    if (!Array.isArray(legacyList)) return
+
+    // Only migrate conversations that match this user's username/persona/owner
+    const matching = legacyList.filter(
+      (c) =>
+        c.owner_user_id === userId ||
+        (persona && c.persona?.toLowerCase() === persona.toLowerCase()) ||
+        (!c.owner_user_id && !c.persona && userId === "alice")
+    )
+
+    if (matching.length > 0) {
+      localStorage.setItem(userKey, JSON.stringify(matching))
+    }
+
+    // Keep legacy backup intact without polluting user namespace
+    if (!localStorage.getItem("dars_rag_conversations_backup")) {
+      localStorage.setItem("dars_rag_conversations_backup", legacyRaw)
+    }
+  } catch (err) {
+    console.warn("Storage migration skipped:", err)
+  }
+}
 
 export function generateConversationTitle(query: string): string {
   const clean = query.trim().replace(/^["']|["']$/g, "")
@@ -24,9 +68,13 @@ export function generateConversationTitle(query: string): string {
 }
 
 export const storage = {
-  getConversations(persona?: string): Conversation[] {
+  getConversations(persona?: string, userId?: string): Conversation[] {
     try {
-      const raw = localStorage.getItem(CONVERSATIONS_KEY)
+      if (userId) {
+        migrateLegacyConversationsIfNeeded(userId, persona)
+      }
+      const key = getStorageKey(userId)
+      const raw = localStorage.getItem(key)
       if (!raw) return []
       const list: Conversation[] = JSON.parse(raw)
       list.forEach((c) => {
@@ -65,13 +113,14 @@ export const storage = {
     }
   },
 
-  getConversation(id: string): Conversation | null {
-    const list = this.getConversations()
+  getConversation(id: string, userId?: string): Conversation | null {
+    const list = this.getConversations(undefined, userId)
     return list.find((c) => c.id === id) || null
   },
 
-  saveConversation(conv: Conversation): void {
-    const list = this.getConversations()
+  saveConversation(conv: Conversation, userId?: string): void {
+    const effectiveUserId = userId || conv.owner_user_id
+    const list = this.getConversations(undefined, effectiveUserId)
     const index = list.findIndex((c) => c.id === conv.id)
     if (index >= 0) {
       list[index] = conv
@@ -79,31 +128,39 @@ export const storage = {
       list.unshift(conv)
     }
     try {
-      localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(list))
+      const key = getStorageKey(effectiveUserId)
+      localStorage.setItem(key, JSON.stringify(list))
     } catch (e) {
       console.warn("Local storage write limit reached", e)
     }
   },
 
-  deleteConversation(id: string): void {
-    const list = this.getConversations().filter((c) => c.id !== id)
-    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(list))
+  deleteConversation(id: string, userId?: string): void {
+    const key = getStorageKey(userId)
+    const list = this.getConversations(undefined, userId).filter((c) => c.id !== id)
+    localStorage.setItem(key, JSON.stringify(list))
   },
 
-  pinConversation(id: string, pinned: boolean): void {
-    const conv = this.getConversation(id)
+  pinConversation(id: string, pinned: boolean, userId?: string): void {
+    const conv = this.getConversation(id, userId)
     if (conv) {
       conv.pinned = pinned
-      this.saveConversation(conv)
+      this.saveConversation(conv, userId)
     }
   },
 
-  renameConversation(id: string, newTitle: string): void {
-    const conv = this.getConversation(id)
+  renameConversation(id: string, newTitle: string, userId?: string): void {
+    const conv = this.getConversation(id, userId)
     if (conv) {
       conv.title = newTitle.trim()
       conv.updatedAt = new Date().toISOString()
-      this.saveConversation(conv)
+      this.saveConversation(conv, userId)
+    }
+  },
+
+  clearUserConversations(userId?: string): void {
+    if (userId) {
+      localStorage.removeItem(getStorageKey(userId))
     }
   },
 
